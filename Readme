@@ -1,0 +1,24 @@
+راه‌اندازی سریع
+Ollama:
+ollama serve
+ollama pull gemma3:4b
+Backend:
+cd monorepo\backend
+. .venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+Frontend:
+cd monorepo\frontend
+npm run dev
+CLI:
+cd monorepo\cli
+. .venv\Scripts\Activate.ps1
+python app.py extract --text "علی در تهران زندگی می‌کند و در شرکت دیجی‌کالا کار می‌کند." --language fa --report-out report.html
+نکته
+اگر /api/health خروجی نداد، مطمئن شوید uvicorn در حال اجراست و پورت 8000 باز است. همچنین پراکسی Vite /api را به 8000 می‌فرستد.
+هشدار Pydantic درباره فیلد schema بی‌خطر است.
+تغییرات مهم:
+shared/langextract: اتصال Ollama، پرامپت‌های few-shot، نرمال‌سازی اسکیمای خروجی، تولید گزارش HTML
+backend FastAPI: مسیرهای /api/health, /api/schemas, /api/extract, /api/report
+frontend React/Vite: فرم ورودی متن، انتخاب زبان/مدل، نمایش نتایج و دکمه گزارش HTML
+cli: Typer برای extract/report و تست دودکش Pytest
+مثال‌ها: اسکریپت examples/extract_example.py و نوت‌بوک examples/LangExtract_Quickstart.ipynb
