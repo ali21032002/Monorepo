@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from . import config
-from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis
+from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis, ChatRequest, ChatResponse
 from .file_extract import extract_text_from_file
 
 # Add shared package to sys.path
@@ -277,3 +277,93 @@ def multi_extract(req: MultiModelRequest) -> MultiModelResponse:
 		)
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(req: ChatRequest) -> ChatResponse:
+	"""Chat endpoint for conversational analysis"""
+	if not req.message or not req.message.strip():
+		raise HTTPException(status_code=400, detail="'message' is required")
+
+	language = (req.language or "fa").lower()
+	domain = req.domain or "general"
+	model_name = req.model or config.OLLAMA_MODEL
+
+	try:
+		# Build a conversational prompt based on domain
+		domain_titles = {
+			"police": "دستیار هوشمند امنیتی و پلیسی",
+			"legal": "دستیار هوشمند حقوقی", 
+			"medical": "دستیار هوشمند پزشکی",
+			"general": "دستیار هوشمند عمومی"
+		}
+		
+		domain_expertise = {
+			"police": "شما متخصص تحلیل متون امنیتی، پلیسی، جرایم، تهدیدات و موارد مشکوک هستید.",
+			"legal": "شما متخصص تحلیل متون حقوقی، قوانین، قراردادها، دادگاه‌ها و مسائل قانونی هستید.",
+			"medical": "شما متخصص تحلیل متون پزشکی، تشخیص‌ها، درمان‌ها، داروها و مسائل سلامت هستید.",
+			"general": "شما متخصص تحلیل متون عمومی و استخراج اطلاعات ساختاریافته هستید."
+		}
+		
+		title = domain_titles.get(domain, domain_titles["general"])
+		expertise = domain_expertise.get(domain, domain_expertise["general"])
+		
+		system_prompt = f"""شما {title} مرکز مدیریت و تحلیل داده فراجا هستید.
+{expertise}
+به سوالات کاربر پاسخ دهید و در صورت نیاز تحلیل متن ارائه دهید.
+پاسخ‌های خود را کوتاه، مفید و به زبان {language} ارائه دهید."""
+
+		# Check if user wants analysis
+		analysis_keywords = ['تحلیل', 'استخراج', 'موجودیت', 'رابطه', 'analyze', 'extract']
+		wants_analysis = any(keyword in req.message.lower() for keyword in analysis_keywords)
+
+		if wants_analysis and len(req.message) > 50:
+			# Perform quick analysis
+			try:
+				analysis_result = run_extraction(
+					text=req.message,
+					language=language,
+					domain=domain,
+					model=model_name,
+					temperature=0.1,
+					max_output_tokens=512
+				)
+				
+				entities_count = len(analysis_result.get("entities", []))
+				relationships_count = len(analysis_result.get("relationships", []))
+				
+				response_message = f"""متن شما تحلیل شد:
+- {entities_count} موجودیت شناسایی شد
+- {relationships_count} رابطه یافت شد
+
+برای مشاهده تحلیل کامل، از بخش تحلیل اصلی استفاده کنید."""
+
+				return ChatResponse(
+					message=response_message,
+					analysis=analysis_result
+				)
+			except Exception:
+				pass  # Fall back to regular chat
+
+		# Regular chat response
+		from langextract.ollama_backend import chat_json
+		
+		user_prompt = f"کاربر می‌پرسد: {req.message}\n\nپاسخ کوتاه و مفید:"
+		
+		response = chat_json(
+			system_prompt=system_prompt,
+			user_prompt=user_prompt,
+			model=model_name,
+			temperature=0.7,
+			max_output_tokens=256
+		)
+
+		# Clean up response
+		clean_response = response.strip()
+		if clean_response.startswith('"') and clean_response.endswith('"'):
+			clean_response = clean_response[1:-1]
+
+		return ChatResponse(message=clean_response)
+
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")

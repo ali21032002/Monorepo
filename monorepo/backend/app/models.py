@@ -92,3 +92,16 @@ class SchemasResponse(BaseModel):
 
 class DomainsResponse(BaseModel):
 	domains: List[str]
+
+
+# Chat models
+class ChatRequest(BaseModel):
+	message: str
+	language: Optional[str] = Field(default="fa", description="fa or en")
+	domain: Optional[str] = Field(default="general", description="Domain: general, legal, medical, police")
+	model: Optional[str] = None
+
+
+class ChatResponse(BaseModel):
+	message: str
+	analysis: Optional[Dict[str, Any]] = None
