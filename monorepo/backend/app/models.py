@@ -100,8 +100,13 @@ class ChatRequest(BaseModel):
 	language: Optional[str] = Field(default="fa", description="fa or en")
 	domain: Optional[str] = Field(default="general", description="Domain: general, legal, medical, police")
 	model: Optional[str] = None
+	analysisMode: Optional[str] = Field(default="single", description="single or multi")
+	model_first: Optional[str] = None
+	model_second: Optional[str] = None
+	model_referee: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
 	message: str
 	analysis: Optional[Dict[str, Any]] = None
+	analysisMode: Optional[str] = None

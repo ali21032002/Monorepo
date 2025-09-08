@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useRef } from 'react'
 import './App.css'
 
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
@@ -39,15 +39,14 @@ interface ChatMessage {
   timestamp: Date
   isAudio?: boolean
   audioUrl?: string
+  analysis?: ExtractionResponse | MultiModelResponse | null
+  analysisMode?: 'single' | 'multi'
 }
 
 interface ChatResponse {
   message: string
-  analysis?: {
-    entities: Entity[]
-    relationships: Relationship[]
-    interpretations: string[]
-  }
+  analysis?: ExtractionResponse | MultiModelResponse | null
+  analysisMode?: 'single' | 'multi'
 }
 
 function App() {
@@ -95,17 +94,17 @@ function App() {
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [chatLoading, setChatLoading] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
-
-  // Computed values
-  const entityCount = useMemo(() => {
-    if (analysisMode === 'single') return result?.entities?.length ?? 0
-    return multiResult?.final_analysis?.entities?.length ?? 0
-  }, [result, multiResult, analysisMode])
+  const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
   
-  const relCount = useMemo(() => {
-    if (analysisMode === 'single') return result?.relationships?.length ?? 0
-    return multiResult?.final_analysis?.relationships?.length ?? 0
-  }, [result, multiResult, analysisMode])
+  // Ref for auto-scrolling chat messages
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null)
+  
+  // Auto-scroll to bottom of chat
+  const scrollToBottom = () => {
+    chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // Computed values - removed unused entityCount and relCount
 
   // Generate smart interpretations
   const generateInterpretations = (entities: Entity[], relationships: Relationship[], domain: string, language: string): Interpretation[] => {
@@ -230,6 +229,11 @@ function App() {
     loadModels()
   }, [])
 
+  // Auto-scroll when messages change
+  useEffect(() => {
+    scrollToBottom()
+  }, [chatMessages, chatLoading])
+
   // Analysis functions
   const onSingleExtract = async () => {
     setLoading(true)
@@ -338,6 +342,9 @@ function App() {
     setChatMessages(prev => [...prev, userMessage])
     setChatInput('')
     setChatLoading(true)
+    
+    // Scroll to bottom after adding user message
+    setTimeout(() => scrollToBottom(), 100)
 
     try {
       const resp = await fetchWithTimeout('/api/chat', {
@@ -347,7 +354,13 @@ function App() {
           message,
           language,
           domain,
-          model: model || modelReferee || 'gemma3:4b'
+          model: model || modelReferee || 'gemma3:4b',
+          analysisMode: chatMode,
+          ...(chatMode === 'multi' && {
+            model_first: modelFirst,
+            model_second: modelSecond,
+            model_referee: modelReferee
+          })
         }),
       })
 
@@ -358,10 +371,15 @@ function App() {
         id: (Date.now() + 1).toString(),
         type: 'assistant',
         content: data.message,
-        timestamp: new Date()
+        timestamp: new Date(),
+        analysis: data.analysis,
+        analysisMode: data.analysisMode
       }
 
       setChatMessages(prev => [...prev, assistantMessage])
+      
+      // Scroll to bottom after adding assistant message
+      setTimeout(() => scrollToBottom(), 100)
     } catch (e: any) {
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -370,6 +388,9 @@ function App() {
         timestamp: new Date()
       }
       setChatMessages(prev => [...prev, errorMessage])
+      
+      // Scroll to bottom after adding error message
+      setTimeout(() => scrollToBottom(), 100)
     } finally {
       setChatLoading(false)
     }
@@ -432,6 +453,19 @@ function App() {
         setCopiedMessageId(null)
       }, 2000)
     }
+  }
+
+  // Resend message function
+  const resendMessage = (messageContent: string) => {
+    setChatInput(messageContent)
+    // Focus on input field after setting the content
+    setTimeout(() => {
+      const inputElement = document.querySelector('.chat-input') as HTMLInputElement
+      if (inputElement) {
+        inputElement.focus()
+        inputElement.setSelectionRange(inputElement.value.length, inputElement.value.length)
+      }
+    }, 100)
   }
 
   return (
@@ -763,6 +797,97 @@ function App() {
       {/* Chat Tab */}
       {activeTab === 'chat' && (
         <div className='chat-tab'>
+          {/* Chat Controls */}
+          <div className='chat-controls'>
+            <label className='field'>
+              <span>نوع تحلیل در چت</span>
+              <select className='select' value={chatMode} onChange={(e) => setChatMode(e.target.value as 'single' | 'multi')}>
+                <option value='single'>تک مدل</option>
+                <option value='multi'>چند مدل (داوری)</option>
+              </select>
+            </label>
+            
+            <label className='field'>
+              <span>زبان</span>
+              <select className='select' value={language} onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}>
+                <option value='fa'>فارسی</option>
+                <option value='en'>English</option>
+              </select>
+            </label>
+            
+            <label className='field'>
+              <span>حوزه تخصصی</span>
+              <select className='select' value={domain} onChange={(e) => setDomain(e.target.value as 'general' | 'legal' | 'medical' | 'police')}>
+                <option value='general'>عمومی</option>
+                <option value='legal'>حقوقی</option>
+                <option value='medical'>پزشکی</option>
+                <option value='police'>پلیسی</option>
+              </select>
+            </label>
+
+            {chatMode === 'single' ? (
+              <label className='field'>
+                <span>مدل</span>
+                {modelsLoading ? (
+                  <select className='select' disabled>
+                    <option>در حال بارگیری...</option>
+                  </select>
+                ) : (
+                  <select className='select' value={model} onChange={(e) => setModel(e.target.value)}>
+                    {availableModels.map((modelName) => (
+                      <option key={modelName} value={modelName}>{modelName}</option>
+                    ))}
+                  </select>
+                )}
+              </label>
+            ) : (
+              <>
+                <label className='field'>
+                  <span>مدل اول</span>
+                  {modelsLoading ? (
+                    <select className='select' disabled>
+                      <option>در حال بارگیری...</option>
+                    </select>
+                  ) : (
+                    <select className='select' value={modelFirst} onChange={(e) => setModelFirst(e.target.value)}>
+                      {availableModels.map((modelName) => (
+                        <option key={modelName} value={modelName}>{modelName}</option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+                <label className='field'>
+                  <span>مدل دوم</span>
+                  {modelsLoading ? (
+                    <select className='select' disabled>
+                      <option>در حال بارگیری...</option>
+                    </select>
+                  ) : (
+                    <select className='select' value={modelSecond} onChange={(e) => setModelSecond(e.target.value)}>
+                      {availableModels.map((modelName) => (
+                        <option key={modelName} value={modelName}>{modelName}</option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+                <label className='field'>
+                  <span>مدل داور</span>
+                  {modelsLoading ? (
+                    <select className='select' disabled>
+                      <option>در حال بارگیری...</option>
+                    </select>
+                  ) : (
+                    <select className='select' value={modelReferee} onChange={(e) => setModelReferee(e.target.value)}>
+                      {availableModels.map((modelName) => (
+                        <option key={modelName} value={modelName}>{modelName}</option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+              </>
+            )}
+          </div>
+          
            <div className='chat-section'>
              <div className='chat-header'>
                <h3>
@@ -770,6 +895,7 @@ function App() {
                  {domain === 'legal' && 'دستیار هوشمند حقوقی'}
                  {domain === 'medical' && 'دستیار هوشمند پزشکی'}
                  {domain === 'general' && 'دستیار هوشمند عمومی'}
+                 {chatMode === 'multi' && ' (با داوری چندمدله)'}
                </h3>
                <p>سوالات خود را بپرسید یا صدای خود را ضبط کنید</p>
              </div>
@@ -795,16 +921,87 @@ function App() {
                           </audio>
                         )}
                         <p>{msg.content}</p>
+                        
+                        {/* Display analysis results if available */}
+                        {msg.analysis && msg.type === 'assistant' && (
+                          <div className='chat-analysis'>
+                            <h4>📊 نتایج تحلیل {msg.analysisMode === 'multi' ? '(داوری چندمدله)' : ''}</h4>
+                            
+                            {msg.analysisMode === 'single' && 'entities' in msg.analysis && (
+                              <div className='chat-analysis-single'>
+                                <div className='analysis-summary'>
+                                  <span>موجودیت‌ها: {msg.analysis.entities.length}</span>
+                                  <span>روابط: {msg.analysis.relationships.length}</span>
+                                </div>
+                                <div className='analysis-details'>
+                                  {msg.analysis.entities.length > 0 && (
+                                    <div>
+                                      <strong>موجودیت‌ها:</strong>
+                                      <ul className='compact-list'>
+                                        {msg.analysis.entities.slice(0, 5).map((e, idx) => (
+                                          <li key={idx}><b>{e.name}</b> <small>({e.type})</small></li>
+                                        ))}
+                                        {msg.analysis.entities.length > 5 && <li><small>... و {msg.analysis.entities.length - 5} مورد دیگر</small></li>}
+                                      </ul>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            
+                            {msg.analysisMode === 'multi' && 'final_analysis' in msg.analysis && (
+                              <div className='chat-analysis-multi'>
+                                <div className='analysis-summary'>
+                                  <span>موجودیت‌های نهایی: {msg.analysis.final_analysis.entities.length}</span>
+                                  <span>روابط نهایی: {msg.analysis.final_analysis.relationships.length}</span>
+                                  <span>توافق: {((msg.analysis.agreement_score || 0) * 100).toFixed(1)}%</span>
+                                </div>
+                                <div className='analysis-details'>
+                                  {msg.analysis.final_analysis.entities.length > 0 && (
+                                    <div>
+                                      <strong>⚖️ نتیجه نهایی داور:</strong>
+                                      <ul className='compact-list'>
+                                        {msg.analysis.final_analysis.entities.slice(0, 5).map((e, idx) => (
+                                          <li key={idx} className={e.type.includes('INFERENCE') || e.type.includes('SUSPICIOUS') ? 'inference-entity' : ''}>
+                                            <b>{e.name}</b> <small>({e.type})</small>
+                                          </li>
+                                        ))}
+                                        {msg.analysis.final_analysis.entities.length > 5 && <li><small>... و {msg.analysis.final_analysis.entities.length - 5} مورد دیگر</small></li>}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {(msg.analysis.conflicting_entities.length > 0 || msg.analysis.conflicting_relationships.length > 0) && (
+                                    <div className='conflicts-summary'>
+                                      <strong>⚠️ تعارضات:</strong>
+                                      {msg.analysis.conflicting_entities.length > 0 && <span>{msg.analysis.conflicting_entities.length} موجودیت متعارض</span>}
+                                      {msg.analysis.conflicting_relationships.length > 0 && <span>{msg.analysis.conflicting_relationships.length} رابطه متعارض</span>}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
                         <small className='message-time'>
                           {msg.timestamp.toLocaleTimeString('fa-IR')}
                         </small>
-                        <button
-                          className={`copy-btn ${copiedMessageId === msg.id ? 'copied' : ''}`}
-                          onClick={() => copyMessage(msg.content, msg.id)}
-                          title='کپی پیام'
-                        >
-                          {copiedMessageId === msg.id ? '✅' : '📑'}
-                        </button>
+                        <div className='message-actions'>
+                          <button
+                            className={`copy-btn ${copiedMessageId === msg.id ? 'copied' : ''}`}
+                            onClick={() => copyMessage(msg.content, msg.id)}
+                            title='کپی پیام'
+                          >
+                            {copiedMessageId === msg.id ? '✅' : '📑'}
+                          </button>
+                          <button
+                            className='resend-btn'
+                            onClick={() => resendMessage(msg.content)}
+                            title='ارسال مجدد'
+                          >
+                            🔄
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))
@@ -816,6 +1013,8 @@ function App() {
                     </div>
                   </div>
                 )}
+                {/* Invisible element for auto-scroll */}
+                <div ref={chatMessagesEndRef} />
               </div>
               
               <div className='chat-input-area'>

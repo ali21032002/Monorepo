@@ -869,7 +869,7 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-.message-content:hover .copy-btn {
+.message-content:hover .message-actions {
   opacity: 1;
   visibility: visible;
 }
@@ -887,45 +887,71 @@ body {
   border-bottom-left-radius: 4px;
 }
 
-/* Copy button */
-.copy-btn {
+  /* Message Actions Container */
+.message-actions {
   position: absolute;
-  top: 0.5rem;
+  top: -25px;
   right: 0.5rem;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.2s ease;
+}
+
+/* Copy and Resend buttons */
+.copy-btn,
+.resend-btn {
   background: rgba(0, 0, 0, 0.1);
   border: none;
   border-radius: 4px;
   padding: 0.25rem;
   font-size: 0.75rem;
   cursor: pointer;
-  opacity: 0;
-  visibility: hidden;
   transition: all 0.2s ease;
   backdrop-filter: blur(4px);
   color: inherit;
+  min-width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.copy-btn:hover {
+.copy-btn:hover,
+.resend-btn:hover {
   background: rgba(0, 0, 0, 0.2);
   transform: scale(1.1);
 }
 
-.chat-message.user .copy-btn {
+.resend-btn:hover {
+  background: rgba(255, 165, 0, 0.2);
+}
+
+.chat-message.user .copy-btn,
+.chat-message.user .resend-btn {
   background: rgba(255, 255, 255, 0.2);
   color: white;
 }
 
-.chat-message.user .copy-btn:hover {
+.chat-message.user .copy-btn:hover,
+.chat-message.user .resend-btn:hover {
   background: rgba(255, 255, 255, 0.3);
 }
 
-.chat-message.assistant .copy-btn {
+.chat-message.assistant .copy-btn,
+.chat-message.assistant .resend-btn {
   background: rgba(0, 0, 0, 0.1);
   color: #374151;
 }
 
-.chat-message.assistant .copy-btn:hover {
+.chat-message.assistant .copy-btn:hover,
+.chat-message.assistant .resend-btn:hover {
   background: rgba(0, 0, 0, 0.15);
+}
+
+.chat-message.assistant .resend-btn:hover {
+  background: rgba(255, 165, 0, 0.15);
 }
 
 /* Copy success animation */
@@ -1030,6 +1056,121 @@ body {
   border-color: #ef4444;
 }
 
+/* Chat Controls */
+.chat-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  padding: 20px;
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+/* Chat Analysis Styles */
+.chat-analysis {
+  background: linear-gradient(135deg, var(--primary-50), var(--gray-50));
+  border: 1px solid var(--primary-200);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.chat-analysis h4 {
+  margin: 0 0 12px 0;
+  color: var(--primary-700);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chat-analysis-single,
+.chat-analysis-multi {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analysis-summary {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--gray-700);
+}
+
+.analysis-summary span {
+  background: var(--primary-100);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+.analysis-details {
+  font-size: 13px;
+}
+
+.analysis-details strong {
+  color: var(--gray-800);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.compact-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.compact-list li {
+  background: var(--gray-100);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid var(--gray-200);
+}
+
+.compact-list li.inference-entity {
+  background: var(--warning-100);
+  border-color: var(--warning-300);
+  color: var(--warning-800);
+}
+
+.compact-list li b {
+  color: var(--gray-800);
+}
+
+.compact-list li small {
+  color: var(--gray-600);
+}
+
+.conflicts-summary {
+  background: var(--warning-50);
+  border: 1px solid var(--warning-200);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.conflicts-summary strong {
+  color: var(--warning-700);
+  margin-bottom: 8px;
+}
+
+.conflicts-summary span {
+  display: inline-block;
+  background: var(--warning-100);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-right: 8px;
+  color: var(--warning-800);
+}
+
 /* Mobile responsive for chat */
 @media (max-width: 768px) {
   .chat-container {
@@ -1046,5 +1187,18 @@ body {
   
   .chat-input {
     min-width: 200px;
+  }
+  
+  .chat-controls {
+    grid-template-columns: 1fr;
+  }
+  
+  .analysis-summary {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .compact-list {
+    flex-direction: column;
   }
 }
