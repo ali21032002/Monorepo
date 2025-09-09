@@ -404,10 +404,33 @@ function App() {
 
       recorder.ondataavailable = (e) => chunks.push(e.data)
       recorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: 'audio/wav' })
+        const blob = new Blob(chunks, { type: 'audio/webm' })
         const audioUrl = URL.createObjectURL(blob)
-        const transcribedText = 'متن تبدیل شده از صدا (نمونه)'
-        await sendChatMessage(transcribedText, true, audioUrl)
+        
+        try {
+          // Send audio to speech-to-text service
+          const formData = new FormData()
+          formData.append('audio_file', blob, 'recording.wav')
+          formData.append('language', language)
+          
+          const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+            method: 'POST',
+            body: formData,
+          })
+          
+          if (!response.ok) {
+            throw new Error(`Speech-to-text failed: ${response.status}`)
+          }
+          
+          const transcriptionResult = await response.json()
+          const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
+          
+          await sendChatMessage(transcribedText, true, audioUrl)
+        } catch (e: any) {
+          console.error('خطا در تبدیل صدا به متن:', e)
+          const errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
+          await sendChatMessage(errorMessage, true, audioUrl)
+        }
       }
 
       recorder.start()

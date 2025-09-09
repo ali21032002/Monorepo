@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from . import config
-from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis, ChatRequest, ChatResponse
+from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis, ChatRequest, ChatResponse, SpeechToTextRequest, SpeechToTextResponse
 from .file_extract import extract_text_from_file
 
 # Add shared package to sys.path
@@ -429,3 +429,44 @@ def chat(req: ChatRequest) -> ChatResponse:
 
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
+
+
+@app.post("/api/speech-to-text", response_model=SpeechToTextResponse)
+async def speech_to_text(
+	audio_file: UploadFile = File(...),
+	language: str = Form("fa"),
+	model_size: str = Form("base")
+) -> SpeechToTextResponse:
+	"""Convert speech to text using the speech-to-text microservice"""
+	try:
+		import httpx
+		
+		# Prepare form data for the speech-to-text service
+		files = {"audio_file": (audio_file.filename, await audio_file.read(), audio_file.content_type)}
+		data = {"language": language, "model_size": model_size}
+		
+		# Call the speech-to-text microservice
+		async with httpx.AsyncClient(timeout=60.0) as client:
+			response = await client.post(
+				"http://localhost:8001/transcribe",
+				files=files,
+				data=data
+			)
+			
+			if response.status_code != 200:
+				raise HTTPException(
+					status_code=response.status_code,
+					detail=f"Speech-to-text service error: {response.text}"
+				)
+			
+			result = response.json()
+			return SpeechToTextResponse(
+				text=result["text"],
+				language=result["language"],
+				confidence=result.get("confidence")
+			)
+			
+	except httpx.RequestError as e:
+		raise HTTPException(status_code=503, detail=f"Speech-to-text service unavailable: {str(e)}")
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Speech-to-text failed: {str(e)}")
