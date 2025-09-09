@@ -404,10 +404,33 @@ function App() {
 
       recorder.ondataavailable = (e) => chunks.push(e.data)
       recorder.onstop = async () => {
-        const blob = new Blob(chunks, { type: 'audio/wav' })
+        const blob = new Blob(chunks, { type: 'audio/webm' })
         const audioUrl = URL.createObjectURL(blob)
-        const transcribedText = 'متن تبدیل شده از صدا (نمونه)'
-        await sendChatMessage(transcribedText, true, audioUrl)
+        
+        try {
+          // Send audio to speech-to-text service
+          const formData = new FormData()
+          formData.append('audio_file', blob, 'recording.wav')
+          formData.append('language', language)
+          
+          const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+            method: 'POST',
+            body: formData,
+          })
+          
+          if (!response.ok) {
+            throw new Error(`Speech-to-text failed: ${response.status}`)
+          }
+          
+          const transcriptionResult = await response.json()
+          const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
+          
+          await sendChatMessage(transcribedText, true, audioUrl)
+        } catch (e: any) {
+          console.error('خطا در تبدیل صدا به متن:', e)
+          const errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
+          await sendChatMessage(errorMessage, true, audioUrl)
+        }
       }
 
       recorder.start()
@@ -638,9 +661,9 @@ function App() {
                     <div key={idx} className={`interpretation interpretation-${interp.type} confidence-${interp.confidence}`}>
                       <div className='interpretation-icon'>
                         {interp.type === 'inference' && '🔍'}
-                        {interp.type === 'warning' && '⚠️'}
-                        {interp.type === 'risk' && '🚨'}
-                        {interp.type === 'conclusion' && '✅'}
+                        {interp.type === 'warning' && '⚠'}
+                        {interp.type === 'risk' && '🛡'}
+                        {interp.type === 'conclusion' && '✓'}
                       </div>
                       <div className='interpretation-content'>
                         <p className='interpretation-text'>{interp.text}</p>
@@ -738,7 +761,7 @@ function App() {
                   </div>
 
                   <div className='analysis-step final-analysis'>
-                    <h3>⚖️ تصمیم نهایی داور: {multiResult.final_analysis.model_name}</h3>
+                    <h3>⚖ تصمیم نهایی داور: {multiResult.final_analysis.model_name}</h3>
                     <div className='analysis-grid'>
                       <div className='analysis-section'>
                         <h4>موجودیت‌های نهایی ({multiResult.final_analysis.entities.length})</h4>
@@ -764,7 +787,7 @@ function App() {
                   {/* Conflicts */}
                   {(multiResult.conflicting_entities.length > 0 || multiResult.conflicting_relationships.length > 0) && (
                     <div className='conflicts'>
-                      <h3>⚠️ تعارضات شناسایی شده</h3>
+                      <h3>⚠ تعارضات شناسایی شده</h3>
                       {multiResult.conflicting_entities.length > 0 && (
                         <div>
                           <h4>موجودیت‌های متعارض:</h4>
@@ -925,7 +948,7 @@ function App() {
                         {/* Display analysis results if available */}
                         {msg.analysis && msg.type === 'assistant' && (
                           <div className='chat-analysis'>
-                            <h4>📊 نتایج تحلیل {msg.analysisMode === 'multi' ? '(داوری چندمدله)' : ''}</h4>
+                            <h4>⚡ نتایج تحلیل {msg.analysisMode === 'multi' ? '(داوری چندمدله)' : ''}</h4>
                             
                             {msg.analysisMode === 'single' && 'entities' in msg.analysis && (
                               <div className='chat-analysis-single'>
@@ -959,7 +982,7 @@ function App() {
                                 <div className='analysis-details'>
                                   {msg.analysis.final_analysis.entities.length > 0 && (
                                     <div>
-                                      <strong>⚖️ نتیجه نهایی داور:</strong>
+                                      <strong>⚖ نتیجه نهایی داور:</strong>
                                       <ul className='compact-list'>
                                         {msg.analysis.final_analysis.entities.slice(0, 5).map((e, idx) => (
                                           <li key={idx} className={e.type.includes('INFERENCE') || e.type.includes('SUSPICIOUS') ? 'inference-entity' : ''}>
@@ -972,7 +995,7 @@ function App() {
                                   )}
                                   {(msg.analysis.conflicting_entities.length > 0 || msg.analysis.conflicting_relationships.length > 0) && (
                                     <div className='conflicts-summary'>
-                                      <strong>⚠️ تعارضات:</strong>
+                                      <strong>⚠ تعارضات:</strong>
                                       {msg.analysis.conflicting_entities.length > 0 && <span>{msg.analysis.conflicting_entities.length} موجودیت متعارض</span>}
                                       {msg.analysis.conflicting_relationships.length > 0 && <span>{msg.analysis.conflicting_relationships.length} رابطه متعارض</span>}
                                     </div>
@@ -992,14 +1015,14 @@ function App() {
                             onClick={() => copyMessage(msg.content, msg.id)}
                             title='کپی پیام'
                           >
-                            {copiedMessageId === msg.id ? '✅' : '📑'}
+                            {copiedMessageId === msg.id ? '✓' : '⧉'}
                           </button>
                           <button
                             className='resend-btn'
                             onClick={() => resendMessage(msg.content)}
                             title='ارسال مجدد'
                           >
-                            🔄
+                            ↻
                           </button>
                         </div>
                       </div>
@@ -1039,7 +1062,7 @@ function App() {
                     disabled={chatLoading || (!chatInput.trim())}
                     title='ارسال پیام'
                   >
-                    ▶
+                    ➤
                   </button>
                   <button
                     className={`btn ${isRecording ? 'btn-secondary' : 'btn-outline'} chat-voice-btn`}
@@ -1047,7 +1070,7 @@ function App() {
                     disabled={chatLoading}
                     title={isRecording ? 'توقف ضبط' : 'شروع ضبط صدا'}
                   >
-                    {isRecording ? '⏹️ توقف' : '🎤 ضبط'}
+                    {isRecording ? '⏹ توقف' : '🎙 ضبط'}
                   </button>
                 </div>
               </div>

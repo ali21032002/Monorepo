@@ -110,3 +110,15 @@ class ChatResponse(BaseModel):
 	message: str
 	analysis: Optional[Dict[str, Any]] = None
 	analysisMode: Optional[str] = None
+
+
+# Speech-to-Text models
+class SpeechToTextRequest(BaseModel):
+	language: Optional[str] = Field(default="fa", description="Language code (fa, en, etc.)")
+	model_size: Optional[str] = Field(default="base", description="Whisper model size")
+
+
+class SpeechToTextResponse(BaseModel):
+	text: str
+	language: str
+	confidence: Optional[float] = None

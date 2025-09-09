@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # Main Backend Service
+  backend:
+    build: 
+      context: ./monorepo/backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OLLAMA_HOST=http://ollama:11434
+    depends_on:
+      - ollama
+      - speech-to-text
+    volumes:
+      - ./monorepo/shared:/app/shared
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Speech-to-Text Microservice
+  speech-to-text:
+    build: 
+      context: ./monorepo/speechToText
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - whisper-models:/root/.cache/whisper
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./monorepo/frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_SPEECH_URL=http://localhost:8001
+    depends_on:
+      - backend
+      - speech-to-text
+    restart: unless-stopped
+
+  # Ollama Service
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+
+volumes:
+  whisper-models:
+  ollama-data:
