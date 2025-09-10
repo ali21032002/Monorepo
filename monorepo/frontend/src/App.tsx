@@ -90,11 +90,32 @@ function App() {
   // Chat states
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
+  const [chatInputRef, setChatInputRef] = useState<HTMLTextAreaElement | null>(null)
   const [isRecording, setIsRecording] = useState(false)
+  
+  // Auto-resize textarea function
+  const autoResizeTextarea = (textarea: HTMLTextAreaElement) => {
+    textarea.style.height = 'auto'
+    textarea.style.height = Math.min(textarea.scrollHeight, 128) + 'px' // Max height of 8rem (128px)
+  }
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [chatLoading, setChatLoading] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
+  const [darkMode, setDarkMode] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'chat' | 'analysis' | 'general'>('chat')
+
+  // Apply dark mode to body and html
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark-mode')
+      document.body.classList.add('dark-mode')
+    } else {
+      document.documentElement.classList.remove('dark-mode')
+      document.body.classList.remove('dark-mode')
+    }
+  }, [darkMode])
   
   // Ref for auto-scrolling chat messages
   const chatMessagesEndRef = useRef<HTMLDivElement>(null)
@@ -214,7 +235,7 @@ function App() {
       }
     } catch (e: any) {
       console.error('Failed to load models:', e)
-      const fallbackModels = ['gemma3:4b', 'qwen2.5:7b', 'gemma2:9b']
+      const fallbackModels = ['gemma3:4b', 'qwen2.5.2:7b', 'llava:7b']
       setAvailableModels(fallbackModels)
       setModel(fallbackModels[0])
       setModelFirst(fallbackModels[0])
@@ -407,6 +428,23 @@ function App() {
         const blob = new Blob(chunks, { type: 'audio/webm' })
         const audioUrl = URL.createObjectURL(blob)
         
+        // Add user message with audio
+        const userMessage: ChatMessage = {
+          id: Date.now().toString(),
+          type: 'user',
+          content: '[صدا ضبط شد]',
+          timestamp: new Date(),
+          isAudio: true,
+          audioUrl
+        }
+        setChatMessages(prev => [...prev, userMessage])
+        
+        // Show processing message
+        setChatLoading(true)
+        
+        // Scroll to bottom after adding user message
+        setTimeout(() => scrollToBottom(), 100)
+        
         try {
           // Send audio to speech-to-text service
           const formData = new FormData()
@@ -425,11 +463,31 @@ function App() {
           const transcriptionResult = await response.json()
           const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
           
-          await sendChatMessage(transcribedText, true, audioUrl)
+          // Hide processing message and send transcribed text
+          setChatLoading(false)
+          await sendChatMessage(transcribedText, false)
         } catch (e: any) {
           console.error('خطا در تبدیل صدا به متن:', e)
-          const errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
-          await sendChatMessage(errorMessage, true, audioUrl)
+          
+          // Check if the error is due to service unavailability
+          let errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
+          
+          if (e.name === 'AbortError') {
+            errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+          } else if (e.message && (
+            e.message.includes('Failed to fetch') || 
+            e.message.includes('NetworkError') ||
+            e.message.includes('ERR_CONNECTION_REFUSED') ||
+            e.message.includes('ERR_NETWORK_CHANGED')
+          )) {
+            errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+          } else if (e.message && e.message.includes('Speech-to-text failed: 503')) {
+            errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+          }
+          
+          // Hide processing message and send error message
+          setChatLoading(false)
+          await sendChatMessage(errorMessage, false)
         }
       }
 
@@ -481,22 +539,338 @@ function App() {
   // Resend message function
   const resendMessage = (messageContent: string) => {
     setChatInput(messageContent)
-    // Focus on input field after setting the content
+    // Focus on textarea field after setting the content
     setTimeout(() => {
-      const inputElement = document.querySelector('.chat-input') as HTMLInputElement
-      if (inputElement) {
-        inputElement.focus()
-        inputElement.setSelectionRange(inputElement.value.length, inputElement.value.length)
+      if (chatInputRef) {
+        chatInputRef.focus()
+        chatInputRef.setSelectionRange(chatInputRef.value.length, chatInputRef.value.length)
+        autoResizeTextarea(chatInputRef)
       }
     }, 100)
   }
 
   return (
-    <div className='app'>
+    <div className={`app ${darkMode ? 'dark-mode' : ''}`}>
       <header className='hero'>
-        <h1 className='title'>مرکز مدیریت و تحلیل داده فراجا</h1>
-        <p className='subtitle'>سیستم هوش مصنوعی تحلیل متون با قابلیت داوری چندمدله و دستیار تخصصی</p>
+        <div className='header-content'>
+          <div className='header-controls'>
+            <div 
+              className={`theme-toggle ${darkMode ? 'dark' : 'light'}`}
+              onClick={() => setDarkMode(!darkMode)}
+              title={darkMode ? 'تغییر به تم روشن' : 'تغییر به تم تاریک'}
+            >
+              <div className='toggle-track'>
+                <div className='toggle-thumb'>
+                  <span className='toggle-icon'>{darkMode ? '🌙' : '☀️'}</span>
+                </div>
+              </div>
+            </div>
+            <button 
+              className='settings-btn'
+              onClick={() => setSettingsOpen(!settingsOpen)}
+              title='تنظیمات چت'
+            >
+              ⚙️
+            </button>
+          </div>
+          <div className='header-text'>
+            <h1 className='title'>مرکز مدیریت و تحلیل داده فراجا</h1>
+            <p className='subtitle'>سیستم هوشمند تحلیل متن با قابلیت داوری توسط چند مدل مختلف</p>
+            <div className='header-description'>
+              <div className='description-item'>
+                <span className='description-icon'>
+                  {activeTab === 'chat' ? '🤖' : '🔗'}
+                </span>
+                <span className='description-text'>
+                  {activeTab === 'chat' ? 'دستیار تعاملی هوشمند' : 'استخراج روابط چند گانه از متن'}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
       </header>
+
+      {/* Model Status Indicator */}
+      <div className='model-status-indicator'>
+        <div className='status-icon'>
+          {activeTab === 'chat' ? (
+            chatMode === 'multi' ? '⚖️' : '🤖'
+          ) : (
+            analysisMode === 'multi' ? '⚖️' : '🤖'
+          )}
+        </div>
+        <div className='status-text'>
+          {activeTab === 'chat' ? (
+            chatMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+          ) : (
+            analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+          )}
+        </div>
+      </div>
+
+      {/* Settings Popup */}
+      {settingsOpen && (
+        <div className='settings-popup-overlay' onClick={() => setSettingsOpen(false)}>
+          <div className='settings-popup' onClick={(e) => e.stopPropagation()}>
+            <div className='settings-header'>
+              <h3>⚙️ تنظیمات سیستم</h3>
+              <button 
+                className='settings-confirm'
+                onClick={() => setSettingsOpen(false)}
+              >
+                ✓ تایید
+              </button>
+            </div>
+            
+            {/* Settings Tabs */}
+            <div className='settings-tabs'>
+              <button 
+                className={`settings-tab ${settingsTab === 'chat' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('chat')}
+              >
+                💬 چت
+              </button>
+              <button 
+                className={`settings-tab ${settingsTab === 'analysis' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('analysis')}
+              >
+                📊 تحلیل
+              </button>
+              <button 
+                className={`settings-tab ${settingsTab === 'general' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('general')}
+              >
+                ⚙️ عمومی
+              </button>
+            </div>
+            
+            <div className='settings-content'>
+              {/* Chat Tab */}
+              {settingsTab === 'chat' && (
+                <div className='settings-tab-content'>
+                  <div className='settings-section'>
+                    <h4>🎯 حالت چت</h4>
+                    <div className='settings-options'>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='chatMode'
+                          value='single'
+                          checked={chatMode === 'single'}
+                          onChange={(e) => setChatMode(e.target.value as 'single' | 'multi')}
+                        />
+                        <span>تک مدل</span>
+                      </label>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='chatMode'
+                          value='multi'
+                          checked={chatMode === 'multi'}
+                          onChange={(e) => setChatMode(e.target.value as 'single' | 'multi')}
+                        />
+                        <span>چند مدل</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className='settings-section'>
+                    <h4>🤖 مدل چت</h4>
+                    <select 
+                      value={chatMode === 'single' ? model : modelFirst}
+                      onChange={(e) => {
+                        if (chatMode === 'single') {
+                          setModel(e.target.value)
+                        } else {
+                          setModelFirst(e.target.value)
+                        }
+                      }}
+                      className='settings-select'
+                    >
+                      <option value=''>انتخاب مدل...</option>
+                      {availableModels.map((modelName) => (
+                        <option key={modelName} value={modelName}>
+                          {modelName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {chatMode === 'multi' && (
+                    <>
+                      <div className='settings-section'>
+                        <h4>🤖 مدل دوم چت</h4>
+                        <select 
+                          value={modelSecond}
+                          onChange={(e) => setModelSecond(e.target.value)}
+                          className='settings-select'
+                        >
+                          <option value=''>انتخاب مدل دوم...</option>
+                          {availableModels.map((modelName) => (
+                            <option key={modelName} value={modelName}>
+                              {modelName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div className='settings-section'>
+                        <h4>⚖️ مدل داور چت</h4>
+                        <select 
+                          value={modelReferee}
+                          onChange={(e) => setModelReferee(e.target.value)}
+                          className='settings-select'
+                        >
+                          <option value=''>انتخاب مدل داور...</option>
+                          {availableModels.map((modelName) => (
+                            <option key={modelName} value={modelName}>
+                              {modelName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Analysis Tab */}
+              {settingsTab === 'analysis' && (
+                <div className='settings-tab-content'>
+                  <div className='settings-section'>
+                    <h4>📊 حالت تحلیل</h4>
+                    <div className='settings-options'>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='analysisMode'
+                          value='single'
+                          checked={analysisMode === 'single'}
+                          onChange={(e) => setAnalysisMode(e.target.value as 'single' | 'multi')}
+                        />
+                        <span>تک مدل</span>
+                      </label>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='analysisMode'
+                          value='multi'
+                          checked={analysisMode === 'multi'}
+                          onChange={(e) => setAnalysisMode(e.target.value as 'single' | 'multi')}
+                        />
+                        <span>چند مدل</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className='settings-section'>
+                    <h4>🤖 مدل تحلیل</h4>
+                    <select 
+                      value={analysisMode === 'single' ? model : modelFirst}
+                      onChange={(e) => {
+                        if (analysisMode === 'single') {
+                          setModel(e.target.value)
+                        } else {
+                          setModelFirst(e.target.value)
+                        }
+                      }}
+                      className='settings-select'
+                    >
+                      <option value=''>انتخاب مدل...</option>
+                      {availableModels.map((modelName) => (
+                        <option key={modelName} value={modelName}>
+                          {modelName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {analysisMode === 'multi' && (
+                    <>
+                      <div className='settings-section'>
+                        <h4>🤖 مدل دوم تحلیل</h4>
+                        <select 
+                          value={modelSecond}
+                          onChange={(e) => setModelSecond(e.target.value)}
+                          className='settings-select'
+                        >
+                          <option value=''>انتخاب مدل دوم...</option>
+                          {availableModels.map((modelName) => (
+                            <option key={modelName} value={modelName}>
+                              {modelName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div className='settings-section'>
+                        <h4>⚖️ مدل داور تحلیل</h4>
+                        <select 
+                          value={modelReferee}
+                          onChange={(e) => setModelReferee(e.target.value)}
+                          className='settings-select'
+                        >
+                          <option value=''>انتخاب مدل داور...</option>
+                          {availableModels.map((modelName) => (
+                            <option key={modelName} value={modelName}>
+                              {modelName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* General Tab */}
+              {settingsTab === 'general' && (
+                <div className='settings-tab-content'>
+                  <div className='settings-section'>
+                    <h4>🌐 زبان</h4>
+                    <div className='settings-options'>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='language'
+                          value='fa'
+                          checked={language === 'fa'}
+                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}
+                        />
+                        <span>فارسی</span>
+                      </label>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='language'
+                          value='en'
+                          checked={language === 'en'}
+                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}
+                        />
+                        <span>English</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className='settings-section'>
+                    <h4>🎯 حوزه تخصصی</h4>
+                    <select 
+                      value={domain}
+                      onChange={(e) => setDomain(e.target.value as 'general' | 'legal' | 'medical' | 'police')}
+                      className='settings-select'
+                    >
+                      <option value='general'>عمومی</option>
+                      <option value='legal'>حقوقی</option>
+                      <option value='medical'>پزشکی</option>
+                      <option value='police'>پلیسی</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div className='tabs'>
@@ -519,96 +893,6 @@ function App() {
       {/* Analysis Tab */}
       {activeTab === 'analysis' && (
         <div className='analysis-tab'>
-          <div className='controls'>
-            <label className='field'>
-              <span>نوع تحلیل</span>
-              <select className='select' value={analysisMode} onChange={(e) => setAnalysisMode(e.target.value as 'single' | 'multi')}>
-                <option value='single'>تک مدل</option>
-                <option value='multi'>چند مدل (داوری)</option>
-              </select>
-            </label>
-            
-            <label className='field'>
-              <span>زبان</span>
-              <select className='select' value={language} onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}>
-                <option value='fa'>فارسی</option>
-                <option value='en'>English</option>
-              </select>
-            </label>
-            
-            <label className='field'>
-              <span>حوزه تخصصی</span>
-              <select className='select' value={domain} onChange={(e) => setDomain(e.target.value as 'general' | 'legal' | 'medical' | 'police')}>
-                <option value='general'>عمومی</option>
-                <option value='legal'>حقوقی</option>
-                <option value='medical'>پزشکی</option>
-                <option value='police'>پلیسی</option>
-              </select>
-            </label>
-
-            {analysisMode === 'single' ? (
-              <label className='field'>
-                <span>مدل</span>
-                {modelsLoading ? (
-                  <select className='select' disabled>
-                    <option>در حال بارگیری...</option>
-                  </select>
-                ) : (
-                  <select className='select' value={model} onChange={(e) => setModel(e.target.value)}>
-                    {availableModels.map((modelName) => (
-                      <option key={modelName} value={modelName}>{modelName}</option>
-                    ))}
-                  </select>
-                )}
-              </label>
-            ) : (
-              <>
-                <label className='field'>
-                  <span>مدل اول</span>
-                  {modelsLoading ? (
-                    <select className='select' disabled>
-                      <option>در حال بارگیری...</option>
-                    </select>
-                  ) : (
-                    <select className='select' value={modelFirst} onChange={(e) => setModelFirst(e.target.value)}>
-                      {availableModels.map((modelName) => (
-                        <option key={modelName} value={modelName}>{modelName}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-                <label className='field'>
-                  <span>مدل دوم</span>
-                  {modelsLoading ? (
-                    <select className='select' disabled>
-                      <option>در حال بارگیری...</option>
-                    </select>
-                  ) : (
-                    <select className='select' value={modelSecond} onChange={(e) => setModelSecond(e.target.value)}>
-                      {availableModels.map((modelName) => (
-                        <option key={modelName} value={modelName}>{modelName}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-                <label className='field'>
-                  <span>مدل داور</span>
-                  {modelsLoading ? (
-                    <select className='select' disabled>
-                      <option>در حال بارگیری...</option>
-                    </select>
-                  ) : (
-                    <select className='select' value={modelReferee} onChange={(e) => setModelReferee(e.target.value)}>
-                      {availableModels.map((modelName) => (
-                        <option key={modelName} value={modelName}>{modelName}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-              </>
-            )}
-          </div>
-
           <div className='main-content'>
             <div className='input-section'>
               <div className='input-header'>
@@ -820,109 +1104,9 @@ function App() {
       {/* Chat Tab */}
       {activeTab === 'chat' && (
         <div className='chat-tab'>
-          {/* Chat Controls */}
-          <div className='chat-controls'>
-            <label className='field'>
-              <span>نوع تحلیل در چت</span>
-              <select className='select' value={chatMode} onChange={(e) => setChatMode(e.target.value as 'single' | 'multi')}>
-                <option value='single'>تک مدل</option>
-                <option value='multi'>چند مدل (داوری)</option>
-              </select>
-            </label>
-            
-            <label className='field'>
-              <span>زبان</span>
-              <select className='select' value={language} onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}>
-                <option value='fa'>فارسی</option>
-                <option value='en'>English</option>
-              </select>
-            </label>
-            
-            <label className='field'>
-              <span>حوزه تخصصی</span>
-              <select className='select' value={domain} onChange={(e) => setDomain(e.target.value as 'general' | 'legal' | 'medical' | 'police')}>
-                <option value='general'>عمومی</option>
-                <option value='legal'>حقوقی</option>
-                <option value='medical'>پزشکی</option>
-                <option value='police'>پلیسی</option>
-              </select>
-            </label>
 
-            {chatMode === 'single' ? (
-              <label className='field'>
-                <span>مدل</span>
-                {modelsLoading ? (
-                  <select className='select' disabled>
-                    <option>در حال بارگیری...</option>
-                  </select>
-                ) : (
-                  <select className='select' value={model} onChange={(e) => setModel(e.target.value)}>
-                    {availableModels.map((modelName) => (
-                      <option key={modelName} value={modelName}>{modelName}</option>
-                    ))}
-                  </select>
-                )}
-              </label>
-            ) : (
-              <>
-                <label className='field'>
-                  <span>مدل اول</span>
-                  {modelsLoading ? (
-                    <select className='select' disabled>
-                      <option>در حال بارگیری...</option>
-                    </select>
-                  ) : (
-                    <select className='select' value={modelFirst} onChange={(e) => setModelFirst(e.target.value)}>
-                      {availableModels.map((modelName) => (
-                        <option key={modelName} value={modelName}>{modelName}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-                <label className='field'>
-                  <span>مدل دوم</span>
-                  {modelsLoading ? (
-                    <select className='select' disabled>
-                      <option>در حال بارگیری...</option>
-                    </select>
-                  ) : (
-                    <select className='select' value={modelSecond} onChange={(e) => setModelSecond(e.target.value)}>
-                      {availableModels.map((modelName) => (
-                        <option key={modelName} value={modelName}>{modelName}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-                <label className='field'>
-                  <span>مدل داور</span>
-                  {modelsLoading ? (
-                    <select className='select' disabled>
-                      <option>در حال بارگیری...</option>
-                    </select>
-                  ) : (
-                    <select className='select' value={modelReferee} onChange={(e) => setModelReferee(e.target.value)}>
-                      {availableModels.map((modelName) => (
-                        <option key={modelName} value={modelName}>{modelName}</option>
-                      ))}
-                    </select>
-                  )}
-                </label>
-              </>
-            )}
-          </div>
           
            <div className='chat-section'>
-             <div className='chat-header'>
-               <h3>
-                 {domain === 'police' && 'دستیار هوشمند امنیتی و پلیسی'}
-                 {domain === 'legal' && 'دستیار هوشمند حقوقی'}
-                 {domain === 'medical' && 'دستیار هوشمند پزشکی'}
-                 {domain === 'general' && 'دستیار هوشمند عمومی'}
-                 {chatMode === 'multi' && ' (با داوری چندمدله)'}
-               </h3>
-               <p>سوالات خود را بپرسید یا صدای خود را ضبط کنید</p>
-             </div>
-            
             <div className='chat-container'>
               <div className='chat-messages'>
                 {chatMessages.length === 0 ? (
@@ -1042,19 +1226,25 @@ function App() {
               
               <div className='chat-input-area'>
                 <div className='chat-input-container'>
-                  <input
-                    type='text'
+                  <textarea
+                    ref={setChatInputRef}
                     className='chat-input'
                     value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder='پیام خود را بنویسید...'
-                    onKeyPress={(e) => {
+                    onChange={(e) => {
+                      setChatInput(e.target.value)
+                      if (chatInputRef) {
+                        autoResizeTextarea(chatInputRef)
+                      }
+                    }}
+                    placeholder='پیام خود را بنویسید... (Shift+Enter برای خط جدید)'
+                    onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
                         sendChatMessage(chatInput)
                       }
                     }}
                     disabled={chatLoading}
+                    rows={1}
                   />
                   <button
                     className='btn btn-primary chat-send-btn'

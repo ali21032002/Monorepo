@@ -141,6 +141,31 @@ def extract(req: ExtractionRequest) -> ExtractionResponse:
 	temperature = req.temperature if req.temperature is not None else config.TEMPERATURE
 	max_output_tokens = req.max_output_tokens if req.max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
+	# Check if user is asking about the AI assistant
+	ai_question_keywords = [
+		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
+		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
+		'who are you', 'who created you', 'who developed you', 'who wrote you',
+		'where were you developed', 'where were you trained'
+	]
+	is_ai_question = any(keyword in req.text.lower() for keyword in ai_question_keywords)
+	
+	if is_ai_question:
+		ai_response = """من دستیار هوش مصنوعی هستم که در مرکز مدیریت و تحلیل داده فراجا و اداره مهندسی داده توسعه داده شده و آموزش دیده‌ام. توسعه‌دهنده من، سرهنگ مهندس علی سلیمی است و آماده‌ام تا شما را راهنمایی کنم."""
+		return ExtractionResponse(
+			text=req.text,
+			language=language,
+			model=model_name,
+			entities=[{
+				"text": ai_response,
+				"label": "AI_Response",
+				"start": 0,
+				"end": len(ai_response),
+				"confidence": 1.0
+			}],
+			relationships=[]
+		)
+
 	result = run_extraction(
 		text=req.text,
 		language=language,
@@ -184,6 +209,31 @@ async def extract_file(
 	model_name = model or config.OLLAMA_MODEL
 	temperature = temperature if temperature is not None else config.TEMPERATURE
 	max_output_tokens = max_output_tokens if max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
+
+	# Check if user is asking about the AI assistant
+	ai_question_keywords = [
+		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
+		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
+		'who are you', 'who created you', 'who developed you', 'who wrote you',
+		'where were you developed', 'where were you trained'
+	]
+	is_ai_question = any(keyword in text.lower() for keyword in ai_question_keywords)
+	
+	if is_ai_question:
+		ai_response = """من دستیار هوش مصنوعی هستم که در مرکز مدیریت و تحلیل داده فراجا و اداره مهندسی داده توسعه داده شده و آموزش دیده‌ام. توسعه‌دهنده من، سرهنگ مهندس علی سلیمی است و آماده‌ام تا شما را راهنمایی کنم."""
+		return ExtractionResponse(
+			text=text,
+			language=language,
+			model=model_name,
+			entities=[{
+				"text": ai_response,
+				"label": "AI_Response",
+				"start": 0,
+				"end": len(ai_response),
+				"confidence": 1.0
+			}],
+			relationships=[]
+		)
 
 	result = run_extraction(
 		text=text,
@@ -250,6 +300,56 @@ def multi_extract(req: MultiModelRequest) -> MultiModelResponse:
 	temperature = req.temperature if req.temperature is not None else config.TEMPERATURE
 	max_output_tokens = req.max_output_tokens if req.max_output_tokens is not None else config.MAX_OUTPUT_TOKENS
 
+	# Check if user is asking about the AI assistant
+	ai_question_keywords = [
+		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
+		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
+		'who are you', 'who created you', 'who developed you', 'who wrote you',
+		'where were you developed', 'where were you trained'
+	]
+	is_ai_question = any(keyword in req.text.lower() for keyword in ai_question_keywords)
+	
+	if is_ai_question:
+		ai_response = """من دستیار هوش مصنوعی هستم که در مرکز مدیریت و تحلیل داده فراجا و اداره مهندسی داده توسعه داده شده و آموزش دیده‌ام. توسعه‌دهنده من، سرهنگ مهندس علی سلیمی است و آماده‌ام تا شما را راهنمایی کنم."""
+		return MultiModelResponse(
+			text=req.text,
+			language=language,
+			domain=domain,
+			first_analysis=ModelAnalysis(
+				entities=[{
+					"text": ai_response,
+					"label": "AI_Response",
+					"start": 0,
+					"end": len(ai_response),
+					"confidence": 1.0
+				}],
+				relationships=[]
+			),
+			second_analysis=ModelAnalysis(
+				entities=[{
+					"text": ai_response,
+					"label": "AI_Response",
+					"start": 0,
+					"end": len(ai_response),
+					"confidence": 1.0
+				}],
+				relationships=[]
+			),
+			final_analysis=ModelAnalysis(
+				entities=[{
+					"text": ai_response,
+					"label": "AI_Response",
+					"start": 0,
+					"end": len(ai_response),
+					"confidence": 1.0
+				}],
+				relationships=[]
+			),
+			agreement_score=1.0,
+			conflicting_entities=[],
+			conflicting_relationships=[]
+		)
+
 	try:
 		result = run_multi_model_analysis(
 			text=req.text,
@@ -315,6 +415,19 @@ def chat(req: ChatRequest) -> ChatResponse:
 به سوالات کاربر پاسخ دهید و در صورت نیاز تحلیل متن ارائه دهید.
 پاسخ‌های خود را کوتاه، مفید و به زبان {language} ارائه دهید."""
 
+		# Check if user is asking about the AI assistant
+		ai_question_keywords = [
+			'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
+			'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
+			'who are you', 'who created you', 'who developed you', 'who wrote you',
+			'where were you developed', 'where were you trained'
+		]
+		is_ai_question = any(keyword in req.message.lower() for keyword in ai_question_keywords)
+		
+		if is_ai_question:
+			ai_response = """من دستیار هوش مصنوعی هستم که در مرکز مدیریت و تحلیل داده فراجا و اداره مهندسی داده توسعه داده شده و آموزش دیده‌ام. توسعه‌دهنده من، سرهنگ مهندس علی سلیمی است و آماده‌ام تا شما را راهنمایی کنم."""
+			return ChatResponse(message=ai_response)
+		
 		# Check if user wants analysis
 		analysis_keywords = ['تحلیل', 'استخراج', 'موجودیت', 'رابطه', 'analyze', 'extract', 'بررسی', 'شناسایی']
 		wants_analysis = any(keyword in req.message.lower() for keyword in analysis_keywords)
