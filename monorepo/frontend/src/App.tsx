@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import './App.css'
+import ChartComponent from './components/ChartComponent'
 
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
 interface Relationship { id?: string; source_entity_id: string; target_entity_id: string; type: string; attributes?: Record<string, any> }
@@ -41,12 +42,27 @@ interface ChatMessage {
   audioUrl?: string
   analysis?: ExtractionResponse | MultiModelResponse | null
   analysisMode?: 'single' | 'multi'
+  chart?: ChartData | null
+}
+
+interface ChartData {
+  type: 'line' | 'bar' | 'pie' | 'doughnut';
+  title: string;
+  labels: string[];
+  datasets: {
+    label: string;
+    data: number[];
+    backgroundColor?: string | string[];
+    borderColor?: string | string[];
+    borderWidth?: number;
+  }[];
 }
 
 interface ChatResponse {
   message: string
   analysis?: ExtractionResponse | MultiModelResponse | null
   analysisMode?: 'single' | 'multi'
+  chart?: ChartData | null
 }
 
 function App() {
@@ -105,6 +121,10 @@ function App() {
   const [darkMode, setDarkMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'chat' | 'analysis' | 'general'>('chat')
+  
+  // Typing animation states
+  const [typingMessageId, setTypingMessageId] = useState<string | null>(null)
+  const [typingText, setTypingText] = useState('')
 
   // Apply dark mode to body and html
   useEffect(() => {
@@ -123,6 +143,44 @@ function App() {
   // Auto-scroll to bottom of chat
   const scrollToBottom = () => {
     chatMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // Typing animation function
+  const typeText = (text: string, messageId: string, baseSpeed: number = 30) => {
+    setTypingMessageId(messageId)
+    setTypingText('')
+    
+    // Adjust speed based on text length - shorter texts type faster
+    const adjustedSpeed = text.length > 200 ? baseSpeed : Math.max(baseSpeed * 0.7, 15)
+    
+    let currentIndex = 0
+    const interval = setInterval(() => {
+      if (currentIndex < text.length) {
+        setTypingText(text.substring(0, currentIndex + 1))
+        currentIndex++
+        
+        // Auto-scroll every few characters to avoid too much scrolling
+        if (currentIndex % 10 === 0) {
+          scrollToBottom()
+        }
+      } else {
+        clearInterval(interval)
+        setTypingMessageId(null)
+        setTypingText('')
+        
+        // Update the actual message with full text
+        setChatMessages(prev => prev.map(msg => 
+          msg.id === messageId 
+            ? { ...msg, content: text }
+            : msg
+        ))
+        
+        // Final scroll to bottom
+        setTimeout(() => scrollToBottom(), 100)
+      }
+    }, adjustedSpeed)
+    
+    return () => clearInterval(interval)
   }
 
   // Computed values - removed unused entityCount and relCount
@@ -328,6 +386,10 @@ function App() {
       const data: ExtractionResponse = await resp.json()
       setResult(data)
       setText(data.text)
+      
+      // Clear the file after successful extraction to re-enable other controls
+      setFile(null)
+      console.log('📄 File extracted successfully, controls re-enabled')
     } catch (e: any) {
       setError(e?.name === 'AbortError' ? 'Timeout' : (e.message || 'Failed'))
     } finally {
@@ -368,6 +430,125 @@ function App() {
     setTimeout(() => scrollToBottom(), 100)
 
     try {
+      // Smart message history management
+      const prepareMessageHistory = (messages: ChatMessage[]) => {
+        // Exclude the current user message that was just added
+        const previousMessages = messages.slice(0, -1)
+        
+        // If we have few messages, send all of them
+        if (previousMessages.length <= 8) {
+          return previousMessages.map(msg => ({
+            role: msg.type === 'user' ? 'user' : 'assistant',
+            content: msg.content
+          }))
+        }
+        
+        // For longer conversations, use a smart selection strategy:
+        // 1. Always include the first 2 messages (context establishment)
+        // 2. Include the last 8 messages (recent context)
+        // 3. Try to include important messages (containing names, key info)
+        
+        const importantMessages = []
+        
+        // Add first 3 messages for context
+        if (previousMessages.length >= 3) {
+          importantMessages.push(...previousMessages.slice(0, 3))
+        }
+        
+        // Add last 10 messages for recent context
+        const recentMessages = previousMessages.slice(-10)
+        importantMessages.push(...recentMessages)
+        
+        // Try to include important messages from the middle
+        if (previousMessages.length > 13) {
+          const middleMessages = previousMessages.slice(3, -10)
+          const importantKeywords = ['نام', 'اسم', 'کیه', 'کیست', 'کجا', 'چطور', 'چرا', 'چگونه', 'مشکل', 'خطا', 'اشتباه', 'کمک', 'راهنمایی', 'تحلیل', 'بررسی', 'نمودار', 'توضیح', 'پیشنهاد', 'نتیجه']
+          
+          for (const msg of middleMessages) {
+            const content = msg.content.toLowerCase()
+            const hasImportantKeyword = importantKeywords.some(keyword => content.includes(keyword))
+            const isLongMessage = msg.content.length > 50
+            const hasQuestion = content.includes('؟') || content.includes('?')
+            const hasName = /نام\s+من|اسم\s+من|من\s+\w+\s+هستم/.test(content)
+            
+            if (hasImportantKeyword || isLongMessage || hasQuestion || hasName) {
+              importantMessages.push(msg)
+            }
+          }
+        }
+        
+        // Remove duplicates while preserving order
+        const uniqueMessages = []
+        const seen = new Set()
+        
+        for (const msg of importantMessages) {
+          const key = `${msg.type}-${msg.content.substring(0, 50)}`
+          if (!seen.has(key)) {
+            seen.add(key)
+            uniqueMessages.push({
+              role: msg.type === 'user' ? 'user' : 'assistant',
+              content: msg.content
+            })
+          }
+        }
+        
+        // Limit to 18 messages to allow more context for better continuity
+        const finalMessages = uniqueMessages.slice(-18)
+        
+        // Log selection strategy
+        console.log(`📝 Enhanced message selection: ${previousMessages.length} total → ${finalMessages.length} selected`)
+        console.log(`📝 Selection strategy: First 3 + Last 10 + Important middle messages (enhanced criteria)`)
+        
+        return finalMessages
+      }
+      
+      const recentMessages = prepareMessageHistory(chatMessages)
+      
+      // Debug: Log the message history being sent
+      console.log('📝 Sending message history:', recentMessages.length, 'messages')
+      console.log('📝 Message history details:', recentMessages)
+      
+      // Log conversation summary
+      if (recentMessages.length > 0) {
+        const firstMessage = recentMessages[0]
+        const lastMessage = recentMessages[recentMessages.length - 1]
+        console.log(`📝 Conversation span: "${firstMessage.content.substring(0, 30)}..." → "${lastMessage.content.substring(0, 30)}..."`)
+      }
+      
+      // Validate message history
+      if (recentMessages.length > 15) {
+        console.warn('⚠️ Large message history may affect performance')
+      }
+      
+      // Check for proper conversation flow
+      const userCount = recentMessages.filter(msg => msg.role === 'user').length
+      const assistantCount = recentMessages.filter(msg => msg.role === 'assistant').length
+      console.log(`📝 Message balance: ${userCount} user, ${assistantCount} assistant messages`)
+      
+      // Check for conversation quality
+      if (userCount > 0 && assistantCount > 0) {
+        const balanceRatio = userCount / assistantCount
+        if (balanceRatio > 2) {
+          console.warn('⚠️ Warning: User messages significantly outnumber assistant messages')
+        } else if (balanceRatio < 0.5) {
+          console.warn('⚠️ Warning: Assistant messages significantly outnumber user messages')
+        } else {
+          console.log('✅ Good conversation balance')
+        }
+      }
+      
+      // Check for important content
+      const allContent = recentMessages.map(msg => msg.content).join(' ')
+      if (allContent.includes('نام') || allContent.includes('اسم')) {
+        console.log('📝 Context contains name/identity information')
+      }
+      if (allContent.includes('مشکل') || allContent.includes('خطا')) {
+        console.log('📝 Context contains problem/error information')
+      }
+      if (allContent.includes('؟') || allContent.includes('?')) {
+        console.log('📝 Context contains questions')
+      }
+
       const resp = await fetchWithTimeout('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -377,6 +558,7 @@ function App() {
           domain,
           model: model || modelReferee || 'gemma3:4b',
           analysisMode: chatMode,
+          message_history: recentMessages,
           ...(chatMode === 'multi' && {
             model_first: modelFirst,
             model_second: modelSecond,
@@ -394,13 +576,153 @@ function App() {
         content: data.message,
         timestamp: new Date(),
         analysis: data.analysis,
-        analysisMode: data.analysisMode
+        analysisMode: data.analysisMode,
+        chart: data.chart
       }
 
-      setChatMessages(prev => [...prev, assistantMessage])
+      // Log response quality
+      console.log(`📝 Received response: ${data.message.length} characters`)
+      if (data.message.length < 10) {
+        console.warn('⚠️ Warning: Very short response from server')
+      } else if (data.message.length > 500) {
+        console.log('📝 Long response received')
+      }
       
-      // Scroll to bottom after adding assistant message
-      setTimeout(() => scrollToBottom(), 100)
+      // Check if response seems to consider history
+      if (recentMessages.length > 0) {
+        const historyIndicators = ['قبلاً', 'سابقاً', 'گفتم', 'گفتید', 'قبل', 'پیش', 'همان', 'همین']
+        const considersHistory = historyIndicators.some(indicator => data.message.includes(indicator))
+        if (considersHistory) {
+          console.log('✅ Response appears to consider conversation history')
+        } else {
+          console.log('⚠️ Response may not be considering conversation history')
+        }
+        
+        // Check for specific references to previous messages
+        const hasSpecificReference = recentMessages.some(msg => 
+          msg.content.length > 10 && data.message.includes(msg.content.substring(0, 10))
+        )
+        if (hasSpecificReference) {
+          console.log('✅ Response contains specific reference to previous message')
+        }
+        
+        // Check for continuity in conversation
+        const hasContinuity = recentMessages.some(msg => 
+          msg.role === 'user' && data.message.toLowerCase().includes(msg.content.toLowerCase().substring(0, 5))
+        )
+        if (hasContinuity) {
+          console.log('✅ Response shows good conversation continuity')
+        }
+        
+        // Check for context awareness
+        const hasContextAwareness = recentMessages.some(msg => 
+          msg.role === 'assistant' && data.message.toLowerCase().includes(msg.content.toLowerCase().substring(0, 5))
+        )
+        if (hasContextAwareness) {
+          console.log('✅ Response shows context awareness from previous assistant messages')
+        }
+        
+        // Overall conversation quality assessment
+        const qualityIndicators = [
+          considersHistory,
+          hasSpecificReference,
+          hasContinuity,
+          hasContextAwareness
+        ]
+        const qualityScore = qualityIndicators.filter(Boolean).length
+        console.log(`📝 Conversation quality score: ${qualityScore}/4`)
+        
+        if (qualityScore >= 3) {
+          console.log('✅ Excellent conversation quality')
+        } else if (qualityScore >= 2) {
+          console.log('✅ Good conversation quality')
+        } else if (qualityScore >= 1) {
+          console.log('⚠️ Fair conversation quality')
+        } else {
+          console.log('⚠️ Poor conversation quality - may not be considering history')
+        }
+        
+        // Store quality score for potential future use
+        if (qualityScore < 2) {
+          console.warn('⚠️ Consider improving conversation context or model parameters')
+        }
+        
+        // Log conversation summary for debugging
+        console.log(`📝 Conversation summary: ${recentMessages.length} messages, quality: ${qualityScore}/4`)
+        if (recentMessages.length > 0) {
+          const lastUserMessage = recentMessages.filter(msg => msg.role === 'user').pop()
+          const lastAssistantMessage = recentMessages.filter(msg => msg.role === 'assistant').pop()
+          if (lastUserMessage) {
+            console.log(`📝 Last user message: "${lastUserMessage.content.substring(0, 50)}..."`)
+          }
+          if (lastAssistantMessage) {
+            console.log(`📝 Last assistant message: "${lastAssistantMessage.content.substring(0, 50)}..."`)
+          }
+        }
+        
+        // Log current message for context
+        console.log(`📝 Current user message: "${message.substring(0, 50)}..."`)
+        console.log(`📝 Current assistant response: "${data.message.substring(0, 50)}..."`)
+        
+        // Log conversation flow for debugging
+        console.log(`📝 Conversation flow: ${recentMessages.length} previous messages → current exchange`)
+        if (recentMessages.length > 0) {
+          const userMessages = recentMessages.filter(msg => msg.role === 'user').length
+          const assistantMessages = recentMessages.filter(msg => msg.role === 'assistant').length
+          console.log(`📝 Previous flow: ${userMessages} user messages, ${assistantMessages} assistant messages`)
+        }
+        
+        // Log conversation quality metrics
+        console.log(`📝 Quality metrics: History consideration: ${considersHistory}, Specific refs: ${hasSpecificReference}, Continuity: ${hasContinuity}, Context awareness: ${hasContextAwareness}`)
+        
+        // Log conversation health check
+        const healthCheck = {
+          hasHistory: recentMessages.length > 0,
+          hasQuality: qualityScore >= 2,
+          hasContinuity: hasContinuity,
+          hasContext: hasContextAwareness
+        }
+        console.log(`📝 Conversation health check:`, healthCheck)
+        
+        if (!healthCheck.hasHistory) {
+          console.warn('⚠️ No conversation history available')
+        }
+        if (!healthCheck.hasQuality) {
+          console.warn('⚠️ Low conversation quality detected')
+        }
+        
+        // Log conversation improvement suggestions
+        if (qualityScore < 2) {
+          console.log('💡 Suggestions for better conversation quality:')
+          if (!considersHistory) {
+            console.log('  - Model may need better history context')
+          }
+          if (!hasSpecificReference) {
+            console.log('  - Model may need to reference specific previous messages')
+          }
+          if (!hasContinuity) {
+            console.log('  - Model may need better conversation continuity')
+          }
+          if (!hasContextAwareness) {
+            console.log('  - Model may need better context awareness')
+          }
+        }
+        
+        // Log conversation performance summary
+        console.log(`📝 Performance summary: ${recentMessages.length} messages processed, quality score: ${qualityScore}/4, response time: ${Date.now() - Date.now()}ms`)
+      }
+
+      // Add assistant message with empty content first
+      const assistantMessageWithEmptyContent = {
+        ...assistantMessage,
+        content: ''
+      }
+      setChatMessages(prev => [...prev, assistantMessageWithEmptyContent])
+      
+      // Start typing animation
+      setTimeout(() => {
+        typeText(data.message, assistantMessage.id, 20) // 20ms per character
+      }, 200)
     } catch (e: any) {
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
@@ -417,6 +739,102 @@ function App() {
     }
   }
 
+  // Audio upload handler for chat tab
+  const handleChatAudioUpload = async (audioFile: File | undefined) => {
+    if (!audioFile) return
+
+    try {
+      setChatLoading(true)
+      
+      // Convert audio to text using speech-to-text service
+      const formData = new FormData()
+      formData.append('audio_file', audioFile, 'uploaded_audio.wav')
+      formData.append('language', language)
+      
+      const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+        method: 'POST',
+        body: formData,
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Speech-to-text failed: ${response.status}`)
+      }
+      
+      const transcriptionResult = await response.json()
+      const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
+      
+      if (transcribedText && transcribedText.trim()) {
+        // Send the transcribed text as a chat message
+        await sendChatMessage(transcribedText, false)
+        console.log('🎵 Audio uploaded and transcribed for chat:', transcribedText.substring(0, 100) + '...')
+      } else {
+        throw new Error('متن استخراج شده خالی است')
+      }
+    } catch (e: any) {
+      console.error('Chat audio upload error:', e)
+      
+      // Check if the error is due to service unavailability
+      let errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
+      
+      if (e.name === 'AbortError') {
+        errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+      } else if (e.message && (
+        e.message.includes('Failed to fetch') || 
+        e.message.includes('NetworkError') ||
+        e.message.includes('ERR_CONNECTION_REFUSED') ||
+        e.message.includes('ERR_NETWORK_CHANGED')
+      )) {
+        errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+      } else if (e.message && e.message.includes('Speech-to-text failed: 503')) {
+        errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+      }
+      
+      // Send error message to chat
+      await sendChatMessage(errorMessage, false)
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  // Audio upload handler for analysis tab
+  const handleAudioUpload = async (audioFile: File | undefined) => {
+    if (!audioFile) return
+
+    try {
+      setLoading(true)
+      setError(null)
+
+      // Convert audio to text using speech-to-text service
+      const formData = new FormData()
+      formData.append('audio', audioFile)
+      formData.append('language', language)
+
+      const response = await fetchWithTimeout('/api/speech-to-text', {
+        method: 'POST',
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error(`خطا در تبدیل صدا به متن: ${response.status} ${response.statusText}`)
+      }
+
+      const data = await response.json()
+      
+      if (data.text && data.text.trim()) {
+        // Set the transcribed text to the textarea
+        setText(data.text)
+        console.log('🎵 Audio transcribed successfully:', data.text.substring(0, 100) + '...')
+      } else {
+        throw new Error('متن استخراج شده خالی است')
+      }
+    } catch (e: any) {
+      console.error('Audio upload error:', e)
+      setError(`خطا در آپلود صدا: ${e.message || 'نامشخص'}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -428,66 +846,105 @@ function App() {
         const blob = new Blob(chunks, { type: 'audio/webm' })
         const audioUrl = URL.createObjectURL(blob)
         
-        // Add user message with audio
-        const userMessage: ChatMessage = {
-          id: Date.now().toString(),
-          type: 'user',
-          content: '[صدا ضبط شد]',
-          timestamp: new Date(),
-          isAudio: true,
-          audioUrl
-        }
-        setChatMessages(prev => [...prev, userMessage])
-        
-        // Show processing message
-        setChatLoading(true)
-        
-        // Scroll to bottom after adding user message
-        setTimeout(() => scrollToBottom(), 100)
-        
-        try {
-          // Send audio to speech-to-text service
-          const formData = new FormData()
-          formData.append('audio_file', blob, 'recording.wav')
-          formData.append('language', language)
-          
-          const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
-            method: 'POST',
-            body: formData,
-          })
-          
-          if (!response.ok) {
-            throw new Error(`Speech-to-text failed: ${response.status}`)
+        // Check if we're in analysis tab or chat tab
+        if (activeTab === 'analysis') {
+          // For analysis tab, set the transcribed text directly
+          try {
+            setLoading(true)
+            setError(null)
+            
+            // Send audio to speech-to-text service
+            const formData = new FormData()
+            formData.append('audio_file', blob, 'recording.wav')
+            formData.append('language', language)
+            
+            const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+              method: 'POST',
+              body: formData,
+            })
+            
+            if (!response.ok) {
+              throw new Error(`Speech-to-text failed: ${response.status}`)
+            }
+            
+            const transcriptionResult = await response.json()
+            const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
+            
+            if (transcribedText && transcribedText.trim()) {
+              setText(transcribedText)
+              console.log('🎤 Audio transcribed for analysis:', transcribedText.substring(0, 100) + '...')
+            } else {
+              throw new Error('متن استخراج شده خالی است')
+            }
+          } catch (e: any) {
+            console.error('Audio transcription error:', e)
+            setError(`خطا در تبدیل صدا به متن: ${e.message || 'نامشخص'}`)
+          } finally {
+            setLoading(false)
           }
-          
-          const transcriptionResult = await response.json()
-          const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
-          
-          // Hide processing message and send transcribed text
-          setChatLoading(false)
-          await sendChatMessage(transcribedText, false)
-        } catch (e: any) {
-          console.error('خطا در تبدیل صدا به متن:', e)
-          
-          // Check if the error is due to service unavailability
-          let errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
-          
-          if (e.name === 'AbortError') {
-            errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
-          } else if (e.message && (
-            e.message.includes('Failed to fetch') || 
-            e.message.includes('NetworkError') ||
-            e.message.includes('ERR_CONNECTION_REFUSED') ||
-            e.message.includes('ERR_NETWORK_CHANGED')
-          )) {
-            errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
-          } else if (e.message && e.message.includes('Speech-to-text failed: 503')) {
-            errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+        } else {
+          // For chat tab, use existing chat functionality
+          // Add user message with audio
+          const userMessage: ChatMessage = {
+            id: Date.now().toString(),
+            type: 'user',
+            content: '[صدا ضبط شد]',
+            timestamp: new Date(),
+            isAudio: true,
+            audioUrl
           }
+          setChatMessages(prev => [...prev, userMessage])
           
-          // Hide processing message and send error message
-          setChatLoading(false)
-          await sendChatMessage(errorMessage, false)
+          // Show processing message
+          setChatLoading(true)
+          
+          // Scroll to bottom after adding user message
+          setTimeout(() => scrollToBottom(), 100)
+          
+          try {
+            // Send audio to speech-to-text service
+            const formData = new FormData()
+            formData.append('audio_file', blob, 'recording.wav')
+            formData.append('language', language)
+            
+            const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+              method: 'POST',
+              body: formData,
+            })
+            
+            if (!response.ok) {
+              throw new Error(`Speech-to-text failed: ${response.status}`)
+            }
+            
+            const transcriptionResult = await response.json()
+            const transcribedText = transcriptionResult.text || 'خطا در تبدیل صدا به متن'
+            
+            // Hide processing message and send transcribed text
+            setChatLoading(false)
+            await sendChatMessage(transcribedText, false)
+          } catch (e: any) {
+            console.error('خطا در تبدیل صدا به متن:', e)
+            
+            // Check if the error is due to service unavailability
+            let errorMessage = 'خطا در تبدیل صدا به متن. لطفاً دوباره تلاش کنید.'
+            
+            if (e.name === 'AbortError') {
+              errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+            } else if (e.message && (
+              e.message.includes('Failed to fetch') || 
+              e.message.includes('NetworkError') ||
+              e.message.includes('ERR_CONNECTION_REFUSED') ||
+              e.message.includes('ERR_NETWORK_CHANGED')
+            )) {
+              errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+            } else if (e.message && e.message.includes('Speech-to-text failed: 503')) {
+              errorMessage = 'سرویس تحلیل صدا در دسترس نیست. لطفاً با پشتیبانی تماس بگیرید.'
+            }
+            
+            // Hide processing message and send error message
+            setChatLoading(false)
+            await sendChatMessage(errorMessage, false)
+          }
         }
       }
 
@@ -897,6 +1354,9 @@ function App() {
             <div className='input-section'>
               <div className='input-header'>
                 <h3>متن ورودی</h3>
+                <div className='input-help'>
+                  <small>💡 می‌توانید متن را مستقیماً وارد کنید، فایل آپلود کنید، یا صدا ضبط/آپلود کنید</small>
+                </div>
                 <div className='file-controls'>
                   <input 
                     type='file' 
@@ -907,10 +1367,36 @@ function App() {
                   <label htmlFor='file-input' className='btn btn-outline'>
                     انتخاب فایل
                   </label>
+                  
+                  {/* Audio Upload */}
+                  <input 
+                    type='file' 
+                    id='audio-input'
+                    accept='audio/*'
+                    onChange={(e) => handleAudioUpload(e.target.files?.[0])} 
+                    style={{ display: 'none' }}
+                    disabled={!!file}
+                  />
+                  <label htmlFor='audio-input' className={`btn btn-outline ${file ? 'disabled' : ''}`}>
+                    🎵 آپلود صدا
+                  </label>
+                  
+                  {/* Audio Recording */}
+                  <button 
+                    className={`btn ${isRecording ? 'btn-danger' : 'btn-outline'} ${file ? 'disabled' : ''}`}
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={loading || !!file}
+                  >
+                    {isRecording ? '⏹ توقف ضبط' : '🎤 ضبط صدا'}
+                  </button>
+                  
                   {file && (
-                    <button className='btn btn-outline' onClick={onExtractFile} disabled={loading}>
-                      استخراج از فایل
-                    </button>
+                    <div className='file-selected-info'>
+                      <span className='file-name'>📄 {file.name}</span>
+                      <button className='btn btn-primary' onClick={onExtractFile} disabled={loading}>
+                        {loading ? 'در حال استخراج...' : 'استخراج از فایل'}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
@@ -918,16 +1404,17 @@ function App() {
                 className='textarea' 
                 value={text} 
                 onChange={(e) => setText(e.target.value)} 
-                placeholder='متن خود را اینجا وارد کنید یا فایل انتخاب کنید...' 
+                placeholder={file ? 'فایل انتخاب شده است. ابتدا دکمه "استخراج از فایل" را بزنید...' : 'متن خود را اینجا وارد کنید، فایل انتخاب کنید، یا صدا ضبط/آپلود کنید...'} 
+                disabled={!!file}
               />
               <div className='actions'>
-                <button className='btn btn-primary' onClick={onExtract} disabled={loading || modelsLoading}>
+                <button className='btn btn-primary' onClick={onExtract} disabled={loading || modelsLoading || !!file}>
                   {loading ? 'در حال استخراج...' : 'شروع تحلیل'}
                 </button>
-                <button className='btn btn-secondary' onClick={onReport} disabled={loading || (!result && !multiResult)}>
+                <button className='btn btn-secondary' onClick={onReport} disabled={loading || (!result && !multiResult) || !!file}>
                   گزارش HTML
                 </button>
-                <button className='btn btn-outline' onClick={loadModels} disabled={modelsLoading} title='بارگیری مجدد مدل‌ها'>
+                <button className='btn btn-outline' onClick={loadModels} disabled={modelsLoading || !!file} title='بارگیری مجدد مدل‌ها'>
                   {modelsLoading ? 'بارگیری...' : 'بارگیری مدل‌ها'}
                 </button>
               </div>
@@ -1116,7 +1603,8 @@ function App() {
                       domain === 'legal' ? 'حقوقی' :
                       domain === 'medical' ? 'پزشکی' : 'عمومی'
                     } هستم.</p>
-                    <p>می‌توانم در تحلیل متون تخصصی به شما کمک کنم. سوال خود را بپرسید.</p>
+                    <p>می‌توانم در تحلیل متون تخصصی به شما کمک کنم و نمودارهای مختلف بکشم.</p>
+                    <p>💡 مثال: "یک نمودار میل‌های از فروش محصولات مختلف بکش" یا "نمودار دایره‌ای از توزیع جمعیت نشان بده"</p>
                   </div>
                 ) : (
                   chatMessages.map((msg) => (
@@ -1127,7 +1615,19 @@ function App() {
                             <source src={msg.audioUrl} type='audio/wav' />
                           </audio>
                         )}
-                        <p>{msg.content}</p>
+                        <p>
+                          {typingMessageId === msg.id ? typingText : msg.content}
+                          {typingMessageId === msg.id && (
+                            <span className="typing-cursor">|</span>
+                          )}
+                        </p>
+                        
+                        {/* Display chart if available */}
+                        {msg.chart && msg.type === 'assistant' && (
+                          <div className='chat-chart'>
+                            <ChartComponent chartData={msg.chart} />
+                          </div>
+                        )}
                         
                         {/* Display analysis results if available */}
                         {msg.analysis && msg.type === 'assistant' && (
@@ -1254,14 +1754,35 @@ function App() {
                   >
                     ➤
                   </button>
+                </div>
+                
+                {/* Chat Action Buttons */}
+                <div className='chat-action-buttons'>
                   <button
                     className={`btn ${isRecording ? 'btn-secondary' : 'btn-outline'} chat-voice-btn`}
                     onClick={isRecording ? stopRecording : startRecording}
                     disabled={chatLoading}
                     title={isRecording ? 'توقف ضبط' : 'شروع ضبط صدا'}
                   >
-                    {isRecording ? '⏹ توقف' : '🎙 ضبط'}
+                    {isRecording ? '⏹ توقف ضبط' : '🎙 ضبط صدا'}
                   </button>
+                  
+                  {/* Audio Upload for Chat */}
+                  <input 
+                    type='file' 
+                    id='chat-audio-input'
+                    accept='audio/*'
+                    onChange={(e) => handleChatAudioUpload(e.target.files?.[0])} 
+                    style={{ display: 'none' }}
+                    disabled={chatLoading}
+                  />
+                  <label 
+                    htmlFor='chat-audio-input' 
+                    className={`btn btn-outline chat-audio-upload-btn ${chatLoading ? 'disabled' : ''}`}
+                    title='آپلود فایل صوتی'
+                  >
+                    🎵 آپلود صدا
+                  </label>
                 </div>
               </div>
             </div>
