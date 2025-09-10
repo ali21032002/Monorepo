@@ -25,7 +25,7 @@ whisper_model = None
 
 class TranscriptionRequest(BaseModel):
     language: Optional[str] = None
-    model_size: str = "base"
+    model_size: str = "large"
 
 class TranscriptionResponse(BaseModel):
     text: str
@@ -48,49 +48,49 @@ def load_whisper_model(model_size: str = "base"):
     return whisper_model
 
 def simple_transcribe(model, audio_bytes, language):
-    """Real transcription using WebA to MP3 conversion + Whisper"""
-    temp_weba_path = None
-    temp_mp3_path = None
+    """Real transcription using WebM to WAV conversion + Whisper"""
+    temp_webm_path = None
+    temp_wav_path = None
     try:
         print(f"Audio data size: {len(audio_bytes)} bytes")
         
-        # Create WebA file
+        # Create WebM file
         import time
         timestamp = int(time.time() * 1000)
-        temp_weba_path = os.path.join(os.getcwd(), f"audio_{timestamp}.weba")
-        temp_mp3_path = os.path.join(os.getcwd(), f"audio_{timestamp}.mp3")
+        temp_webm_path = os.path.join(os.getcwd(), f"audio_{timestamp}.webm")
+        temp_wav_path = os.path.join(os.getcwd(), f"audio_{timestamp}.wav")
         
-        # Write WebA file
-        with open(temp_weba_path, 'wb') as f:
+        # Write WebM file
+        with open(temp_webm_path, 'wb') as f:
             f.write(audio_bytes)
             f.flush()
         
-        print(f"WebA file created: {temp_weba_path}")
-        print(f"File size: {os.path.getsize(temp_weba_path)}")
+        print(f"WebM file created: {temp_webm_path}")
+        print(f"File size: {os.path.getsize(temp_webm_path)}")
         
-        # Convert WebA to MP3 using pydub
+        # Convert WebM to WAV using pydub
         try:
             from pydub import AudioSegment
-            print("Converting WebA to MP3 with pydub...")
+            print("Converting WebM to WAV with pydub...")
             
-            # Load WebA file
-            audio = AudioSegment.from_file(temp_weba_path, format="weba")
+            # Load WebM file
+            audio = AudioSegment.from_file(temp_webm_path, format="webm")
             
-            # Convert to MP3 format
+            # Convert to WAV format with optimal settings for Whisper
             audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
-            audio.export(temp_mp3_path, format="mp3")
+            audio.export(temp_wav_path, format="wav")
             
-            print(f"MP3 file created: {temp_mp3_path}")
-            print(f"MP3 file size: {os.path.getsize(temp_mp3_path)}")
+            print(f"WAV file created: {temp_wav_path}")
+            print(f"WAV file size: {os.path.getsize(temp_wav_path)}")
             
         except Exception as convert_error:
             print(f"Pydub conversion failed: {convert_error}")
             return {"text": f"خطا در تبدیل فایل صوتی: {str(convert_error)}", "language": language, "confidence": 0.0}
         
-        # Use Whisper to transcribe MP3
+        # Use Whisper to transcribe WAV
         try:
             print("Transcribing with Whisper...")
-            result = model.transcribe(temp_mp3_path, language=None, fp16=False)
+            result = model.transcribe(temp_wav_path, language=None, fp16=False)
             text = result["text"].strip()
             detected_language = result.get("language", "unknown")
             
@@ -109,7 +109,7 @@ def simple_transcribe(model, audio_bytes, language):
         return {"text": f"خطا در پردازش صدا: {str(e)}", "language": language, "confidence": 0.0}
     finally:
         # Clean up files
-        for file_path in [temp_weba_path, temp_mp3_path]:
+        for file_path in [temp_webm_path, temp_wav_path]:
             if file_path and os.path.exists(file_path):
                 try:
                     os.unlink(file_path)
@@ -122,7 +122,8 @@ def cleanup_old_temp_files():
     try:
         current_dir = os.getcwd()
         for filename in os.listdir(current_dir):
-            if filename.startswith("temp_audio_") and filename.endswith(".wav"):
+            if (filename.startswith("audio_") and 
+                (filename.endswith(".wav") or filename.endswith(".webm"))):
                 file_path = os.path.join(current_dir, filename)
                 try:
                     # Check if file is older than 1 hour
@@ -141,15 +142,17 @@ def health_check():
         "status": "ok",
         "service": "speech-to-text",
         "whisper_available": True,
+        "model": "large",
         "supported_languages": ["en", "fa", "auto"],
-        "note": "Using Whisper for high-quality speech recognition"
+        "supported_formats": ["webm", "wav", "mp3"],
+        "note": "Using Whisper Large model for high-quality Persian speech recognition"
     }
 
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe_audio(
     audio_file: UploadFile = File(...),
     language: Optional[str] = Form(None),
-    model_size: str = Form("base")
+    model_size: str = Form("large")
 ):
     """
     Transcribe audio file to text using Whisper
@@ -224,7 +227,7 @@ async def transcribe_for_chat(
             raise HTTPException(status_code=400, detail="File must be an audio file")
         
         # Load Whisper model
-        model = load_whisper_model("base")
+        model = load_whisper_model("large")
         
         # Read audio data
         content = await audio_file.read()
