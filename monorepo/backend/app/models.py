@@ -95,6 +95,10 @@ class DomainsResponse(BaseModel):
 
 
 # Chat models
+class ChatMessage(BaseModel):
+	role: str = Field(..., description="user or assistant")
+	content: str
+
 class ChatRequest(BaseModel):
 	message: str
 	language: Optional[str] = Field(default="fa", description="fa or en")
@@ -104,18 +108,33 @@ class ChatRequest(BaseModel):
 	model_first: Optional[str] = None
 	model_second: Optional[str] = None
 	model_referee: Optional[str] = None
+	message_history: Optional[List[ChatMessage]] = Field(default_factory=list, description="Previous conversation messages")
 
+
+class ChartDataset(BaseModel):
+	label: str
+	data: List[float]
+	backgroundColor: Optional[List[str]] = None
+	borderColor: Optional[List[str]] = None
+	borderWidth: Optional[int] = None
+
+class ChartData(BaseModel):
+	type: str = Field(..., description="Chart type: line, bar, pie, doughnut")
+	title: str
+	labels: List[str]
+	datasets: List[ChartDataset]
 
 class ChatResponse(BaseModel):
 	message: str
 	analysis: Optional[Dict[str, Any]] = None
 	analysisMode: Optional[str] = None
+	chart: Optional[ChartData] = None
 
 
 # Speech-to-Text models
 class SpeechToTextRequest(BaseModel):
 	language: Optional[str] = Field(default="fa", description="Language code (fa, en, etc.)")
-	model_size: Optional[str] = Field(default="base", description="Whisper model size")
+	whisper_model_size: Optional[str] = Field(default="base", description="Whisper model size")
 
 
 class SpeechToTextResponse(BaseModel):

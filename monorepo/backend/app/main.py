@@ -1,5 +1,6 @@
 import os
 import sys
+import httpx
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
@@ -7,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from . import config
-from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis, ChatRequest, ChatResponse, SpeechToTextRequest, SpeechToTextResponse
+from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis, ChatRequest, ChatResponse, SpeechToTextRequest, SpeechToTextResponse, ChartData, ChartDataset
 from .file_extract import extract_text_from_file
 
 # Add shared package to sys.path
@@ -19,6 +20,7 @@ if SHARED_DIR not in sys.path:
 
 # Import shared langextract after adjusting path
 from langextract import run_extraction, run_multi_model_analysis, generate_html_report, list_schemas  # type: ignore
+from langextract.ollama_backend import chat_conversational  # type: ignore
 
 app = FastAPI(title="LangExtract Service", version="0.2.0")
 
@@ -143,8 +145,8 @@ def extract(req: ExtractionRequest) -> ExtractionResponse:
 
 	# Check if user is asking about the AI assistant
 	ai_question_keywords = [
-		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
-		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
+		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات', 'علی سلیمی کیه؟',
+		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته','نویسنده تو چه کسی است' ,
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained'
 	]
@@ -410,10 +412,97 @@ def chat(req: ChatRequest) -> ChatResponse:
 		expertise = domain_expertise.get(domain, domain_expertise["general"])
 		
 		analysis_mode_desc = "با داوری چندمدله" if analysis_mode == "multi" else ""
+		
+		# Enhanced system prompt that considers conversation history
+		history_context = ""
+		if req.message_history and len(req.message_history) > 0:
+			# Analyze conversation history to provide better context
+			user_messages = [msg.content for msg in req.message_history if msg.role == "user"]
+			assistant_messages = [msg.content for msg in req.message_history if msg.role == "assistant"]
+			
+			# Extract key topics and names mentioned
+			all_content = " ".join([msg.content for msg in req.message_history])
+			key_topics = []
+			
+			# Look for names, places, and important topics
+			import re
+			name_patterns = [r'نام\s+من\s+(\w+)', r'اسم\s+من\s+(\w+)', r'من\s+(\w+)\s+هستم', r'(\w+)\s+هستم']
+			for pattern in name_patterns:
+				matches = re.findall(pattern, all_content, re.IGNORECASE)
+				key_topics.extend(matches)
+			
+			# Look for important topics
+			topic_keywords = ['مشکل', 'خطا', 'اشتباه', 'کمک', 'راهنمایی', 'تحلیل', 'بررسی', 'سوال', 'پاسخ', 'توضیح']
+			for keyword in topic_keywords:
+				if keyword in all_content.lower():
+					key_topics.append(keyword)
+			
+			# Look for questions
+			question_patterns = [r'(\w+)\s+چیه', r'(\w+)\s+کیست', r'(\w+)\s+کجاست', r'چطور\s+(\w+)']
+			for pattern in question_patterns:
+				matches = re.findall(pattern, all_content, re.IGNORECASE)
+				key_topics.extend(matches)
+			
+			topics_context = ""
+			if key_topics:
+				topics_context = f"\nموضوعات مهم در مکالمه: {', '.join(set(key_topics))}"
+			
+			# Analyze conversation length and complexity
+			total_chars = sum(len(msg.content) for msg in req.message_history)
+			avg_length = total_chars / len(req.message_history) if req.message_history else 0
+			
+			complexity_context = ""
+			if len(req.message_history) > 10:
+				complexity_context = "\nاین یک مکالمه طولانی است. لطفاً سابقه کامل را در نظر بگیرید."
+			elif avg_length > 100:
+				complexity_context = "\nمکالمه شامل پیام‌های طولانی است. لطفاً جزئیات را در نظر بگیرید."
+			
+			history_context = f"""
+مهم: شما در حال ادامه یک مکالمه هستید. لطفاً سابقه مکالمه قبلی را در نظر بگیرید و پاسخ‌های خود را بر اساس آن ارائه دهید.
+
+دستورالعمل‌های مهم:
+- همیشه سابقه مکالمه را بررسی کنید
+- اگر کاربر به موضوعات قبلی اشاره می‌کند، از سابقه استفاده کنید
+- پاسخ‌های خود را بر اساس زمینه مکالمه ارائه دهید
+- اگر کاربر سوال جدیدی می‌پرسد، آن را در ارتباط با سابقه پاسخ دهید
+
+{topics_context}{complexity_context}
+
+تعداد پیام‌های قبلی: {len(req.message_history)}
+توجه: این مکالمه ادامه دارد، پس حتماً سابقه را در نظر بگیرید."""
+		
 		system_prompt = f"""شما {title} {analysis_mode_desc} مرکز مدیریت و تحلیل داده فراجا هستید.
 {expertise}
-به سوالات کاربر پاسخ دهید و در صورت نیاز تحلیل متن ارائه دهید.
-پاسخ‌های خود را کوتاه، مفید و به زبان {language} ارائه دهید."""
+
+قوانین مهم برای پاسخ‌دهی:
+1. همیشه سابقه مکالمه را در نظر بگیرید
+2. اگر کاربر به موضوعات قبلی اشاره می‌کند، از سابقه استفاده کنید
+3. پاسخ‌های خود را کوتاه، مفید و به زبان {language} ارائه دهید
+4. در صورت نیاز تحلیل متن یا نمودار ارائه دهید
+
+قابلیت‌های ویژه شما:
+- تحلیل متون و استخراج موجودیت‌ها و روابط
+- کشیدن نمودار برای نمایش داده‌ها
+- پاسخ‌دهی بر اساس سابقه مکالمه
+- ارجاع به پیام‌های قبلی
+
+برای کشیدن نمودار، از فرمت زیر استفاده کنید:
+```chart
+{{
+  "type": "bar|line|pie|doughnut",
+  "title": "عنوان نمودار",
+  "labels": ["برچسب1", "برچسب2", "برچسب3"],
+  "datasets": [
+    {{
+      "label": "نام مجموعه داده",
+      "data": [10, 20, 30],
+      "backgroundColor": ["#3b82f6", "#10b981", "#f59e0b"]
+    }}
+  ]
+}}
+```
+
+{history_context}"""
 
 		# Check if user is asking about the AI assistant
 		ai_question_keywords = [
@@ -520,25 +609,195 @@ def chat(req: ChatRequest) -> ChatResponse:
 				print(f"Analysis failed: {str(e)}")
 				pass  # Fall back to regular chat
 
-		# Regular chat response
-		from langextract.ollama_backend import chat_json
+		# Regular chat response with message history support
 		
-		user_prompt = f"کاربر می‌پرسد: {req.message}\n\nپاسخ کوتاه و مفید:"
+		# Convert message history to the format expected by ollama
+		message_history = []
+		if req.message_history:
+			for msg in req.message_history:
+				message_history.append({
+					"role": msg.role,
+					"content": msg.content
+				})
+			print(f"📝 Received message history: {len(message_history)} messages")
+			for i, msg in enumerate(message_history):
+				print(f"  {i+1}. {msg['role']}: {msg['content'][:50]}...")
+			
+			# Validate message history format
+			if len(message_history) > 0:
+				print(f"📝 First message: {message_history[0]['role']}: {message_history[0]['content'][:30]}...")
+				print(f"📝 Last message: {message_history[-1]['role']}: {message_history[-1]['content'][:30]}...")
+				
+				# Analyze message patterns
+				user_messages = [msg for msg in message_history if msg['role'] == 'user']
+				assistant_messages = [msg for msg in message_history if msg['role'] == 'assistant']
+				print(f"📝 Message analysis: {len(user_messages)} user, {len(assistant_messages)} assistant")
+				
+				# Check for important patterns
+				all_content = " ".join([msg['content'] for msg in message_history])
+				if 'نام' in all_content or 'اسم' in all_content:
+					print("📝 Contains name/identity information")
+				if 'مشکل' in all_content or 'خطا' in all_content:
+					print("📝 Contains problem/error information")
+				if '؟' in all_content or '?' in all_content:
+					print("📝 Contains questions")
 		
-		response = chat_json(
+		# Adjust parameters based on conversation complexity
+		temperature = 0.7
+		max_tokens = 256
+		
+		if req.message_history and len(req.message_history) > 10:
+			# For long conversations, use lower temperature for consistency
+			temperature = 0.5
+			max_tokens = 512  # Allow longer responses for complex conversations
+			print("📝 Adjusting parameters for long conversation")
+		
+		response = chat_conversational(
 			system_prompt=system_prompt,
-			user_prompt=user_prompt,
+			user_message=req.message,
 			model=model_name,
-			temperature=0.7,
-			max_output_tokens=256
+			message_history=message_history if message_history else None,
+			temperature=temperature,
+			max_output_tokens=max_tokens
 		)
 
 		# Clean up response
 		clean_response = response.strip()
 		if clean_response.startswith('"') and clean_response.endswith('"'):
 			clean_response = clean_response[1:-1]
+		
+		# Extract chart data if present
+		chart_data = None
+		import re
+		chart_pattern = r'```chart\s*\n(.*?)\n```'
+		chart_match = re.search(chart_pattern, clean_response, re.DOTALL)
+		if chart_match:
+			try:
+				import json
+				chart_json = chart_match.group(1).strip()
+				chart_data = json.loads(chart_json)
+				# Remove chart block from response text
+				clean_response = re.sub(chart_pattern, '', clean_response, flags=re.DOTALL).strip()
+				print(f"📊 Chart data extracted: {chart_data.get('type', 'unknown')} chart")
+			except json.JSONDecodeError as e:
+				print(f"⚠️ Failed to parse chart JSON: {e}")
+				chart_data = None
 
-		return ChatResponse(message=clean_response)
+		# Log response quality
+		print(f"📝 Response length: {len(clean_response)} characters")
+		if len(clean_response) < 10:
+			print("⚠️ Warning: Very short response")
+		elif len(clean_response) > 500:
+			print("📝 Long response generated")
+		
+		# Check if response seems to consider history
+		if req.message_history and len(req.message_history) > 0:
+			history_indicators = ['قبلاً', 'سابقاً', 'گفتم', 'گفتید', 'قبل', 'پیش', 'همان', 'همین']
+			considers_history = any(indicator in clean_response for indicator in history_indicators)
+			if considers_history:
+				print("✅ Response appears to consider conversation history")
+			else:
+				print("⚠️ Response may not be considering conversation history")
+			
+			# Check for specific references to previous messages
+			has_specific_reference = any(
+				msg.content in clean_response or 
+				(len(msg.content) > 10 and msg.content[:10] in clean_response)
+				for msg in req.message_history
+			)
+			if has_specific_reference:
+				print("✅ Response contains specific reference to previous message")
+			
+			# Check for continuity in conversation
+			has_continuity = any(
+				msg.role == 'user' and msg.content.lower()[:5] in clean_response.lower()
+				for msg in req.message_history
+			)
+			if has_continuity:
+				print("✅ Response shows good conversation continuity")
+			
+			# Check for context awareness
+			has_context_awareness = any(
+				msg.role == 'assistant' and msg.content.lower()[:5] in clean_response.lower()
+				for msg in req.message_history
+			)
+			if has_context_awareness:
+				print("✅ Response shows context awareness from previous assistant messages")
+			
+			# Overall conversation quality assessment
+			quality_indicators = [
+				considers_history,
+				has_specific_reference,
+				has_continuity,
+				has_context_awareness
+			]
+			quality_score = sum(quality_indicators)
+			print(f"📝 Conversation quality score: {quality_score}/4")
+			
+			if quality_score >= 3:
+				print("✅ Excellent conversation quality")
+			elif quality_score >= 2:
+				print("✅ Good conversation quality")
+			elif quality_score >= 1:
+				print("⚠️ Fair conversation quality")
+			else:
+				print("⚠️ Poor conversation quality - may not be considering history")
+			
+			# Store quality score for potential future use
+			if quality_score < 2:
+				print("⚠️ Consider improving conversation context or model parameters")
+			
+			# Log conversation summary for debugging
+			print(f"📝 Conversation summary: {len(req.message_history)} messages, quality: {quality_score}/4")
+			if req.message_history:
+				last_user_message = next((msg for msg in reversed(req.message_history) if msg.role == 'user'), None)
+				last_assistant_message = next((msg for msg in reversed(req.message_history) if msg.role == 'assistant'), None)
+				if last_user_message:
+					print(f"📝 Last user message: \"{last_user_message.content[:50]}...\"")
+				if last_assistant_message:
+					print(f"📝 Last assistant message: \"{last_assistant_message.content[:50]}...\"")
+			
+			# Log current message for context
+			print(f"📝 Current user message: \"{req.message[:50]}...\"")
+			print(f"📝 Current assistant response: \"{clean_response[:50]}...\"")
+			
+			# Log conversation flow for debugging
+			print(f"📝 Conversation flow: {len(req.message_history)} previous messages → current exchange")
+			if req.message_history:
+				user_messages = sum(1 for msg in req.message_history if msg.role == 'user')
+				assistant_messages = sum(1 for msg in req.message_history if msg.role == 'assistant')
+				print(f"📝 Previous flow: {user_messages} user messages, {assistant_messages} assistant messages")
+			
+			# Log conversation quality metrics
+			print(f"📝 Quality metrics: History consideration: {considers_history}, Specific refs: {has_specific_reference}, Continuity: {has_continuity}, Context awareness: {has_context_awareness}")
+			
+			# Log conversation health check
+			health_check = {
+				'has_history': len(req.message_history) > 0,
+				'has_quality': quality_score >= 2,
+				'has_continuity': has_continuity,
+				'has_context': has_context_awareness
+			}
+			print(f"📝 Conversation health check: {health_check}")
+			
+			if not health_check['has_history']:
+				print("⚠️ No conversation history available")
+			if not health_check['has_quality']:
+				print("⚠️ Low conversation quality detected")
+			
+			# Log conversation improvement suggestions
+			if quality_score < 2:
+				print("💡 Suggestions for better conversation quality:")
+				if not considers_history:
+					print("  - Model may need better history context")
+				if not has_specific_reference:
+					print("  - Model may need to reference specific previous messages")
+				if not has_continuity:
+					print("  - Model may need better conversation continuity")
+				if not has_context_awareness:
+					print("  - Model may need better context awareness")
+
+		return ChatResponse(message=clean_response, chart=chart_data)
 
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
@@ -548,15 +807,13 @@ def chat(req: ChatRequest) -> ChatResponse:
 async def speech_to_text(
 	audio_file: UploadFile = File(...),
 	language: str = Form("fa"),
-	model_size: str = Form("base")
+	whisper_model_size: str = Form("base")
 ) -> SpeechToTextResponse:
 	"""Convert speech to text using the speech-to-text microservice"""
 	try:
-		import httpx
-		
 		# Prepare form data for the speech-to-text service
 		files = {"audio_file": (audio_file.filename, await audio_file.read(), audio_file.content_type)}
-		data = {"language": language, "model_size": model_size}
+		data = {"language": language, "model_size": whisper_model_size}
 		
 		# Call the speech-to-text microservice
 		async with httpx.AsyncClient(timeout=60.0) as client:
