@@ -8,3 +8,8 @@ openai-whisper
 torch
 torchaudio
 pydub
+transformers>=4.30.0
+datasets
+accelerate
+soundfile
+numpy

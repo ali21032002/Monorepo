@@ -52,6 +52,64 @@ def domains() -> DomainsResponse:
 	return DomainsResponse(domains=["general", "legal", "medical", "police"])
 
 
+@app.get("/api/speech-models")
+def get_speech_models() -> Dict[str, Any]:
+	"""Get information about available speech-to-text models"""
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			response = client.get("http://localhost:8001/models")
+			
+			if response.status_code == 200:
+				return response.json()
+			else:
+				return {
+					"status": "error",
+					"error": f"Speech service returned {response.status_code}",
+					"models": {},
+					"hybrid_mode": "unavailable"
+				}
+	except Exception as e:
+		return {
+			"status": "error",
+			"error": f"Speech service unavailable: {str(e)}",
+			"models": {},
+			"hybrid_mode": "unavailable"
+		}
+
+@app.get("/api/chat-speech-status")
+def get_chat_speech_status() -> Dict[str, Any]:
+	"""Get speech-to-text status specifically for chatbot"""
+	try:
+		with httpx.Client(timeout=10.0) as client:
+			# Check both hybrid and regular endpoints
+			hybrid_response = client.get("http://localhost:8001/health")
+			
+			if hybrid_response.status_code == 200:
+				health_data = hybrid_response.json()
+				return {
+					"status": "ok",
+					"hybrid_available": health_data.get("hybrid_mode") == "available",
+					"whisper_available": health_data.get("whisper_available", False),
+					"huggingface_available": health_data.get("huggingface_available", False),
+					"persian_models": health_data.get("persian_models", {}),
+					"recommended_endpoint": "/api/chat-speech-to-text",
+					"note": "Chatbot optimized for Persian hybrid speech recognition"
+				}
+			else:
+				return {
+					"status": "error",
+					"hybrid_available": False,
+					"whisper_available": False,
+					"error": f"Speech service returned {hybrid_response.status_code}"
+				}
+	except Exception as e:
+		return {
+			"status": "error",
+			"hybrid_available": False,
+			"whisper_available": False,
+			"error": f"Speech service unavailable: {str(e)}"
+		}
+
 @app.get("/api/models")
 def get_ollama_models() -> Dict[str, Any]:
 	"""Get list of available Ollama models"""
@@ -803,22 +861,35 @@ def chat(req: ChatRequest) -> ChatResponse:
 		raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 
-@app.post("/api/speech-to-text", response_model=SpeechToTextResponse)
-async def speech_to_text(
+@app.post("/api/chat-speech-to-text", response_model=SpeechToTextResponse)
+async def chat_speech_to_text(
 	audio_file: UploadFile = File(...),
 	language: str = Form("fa"),
-	whisper_model_size: str = Form("base")
+	use_hybrid: bool = Form(True),
+	model_preference: str = Form("auto")
 ) -> SpeechToTextResponse:
-	"""Convert speech to text using the speech-to-text microservice"""
+	"""Convert speech to text for chatbot using hybrid Persian models"""
 	try:
 		# Prepare form data for the speech-to-text service
 		files = {"audio_file": (audio_file.filename, await audio_file.read(), audio_file.content_type)}
-		data = {"language": language, "model_size": whisper_model_size}
+		
+		# Choose endpoint based on hybrid preference
+		if use_hybrid:
+			endpoint = "http://localhost:8001/transcribe-hybrid"
+			data = {
+				"language": language, 
+				"model_preference": model_preference
+			}
+		else:
+			endpoint = "http://localhost:8001/transcribe-chat"
+			data = {
+				"language": language
+			}
 		
 		# Call the speech-to-text microservice
-		async with httpx.AsyncClient(timeout=60.0) as client:
+		async with httpx.AsyncClient(timeout=120.0) as client:  # Increased timeout for hybrid processing
 			response = await client.post(
-				"http://localhost:8001/transcribe",
+				endpoint,
 				files=files,
 				data=data
 			)
@@ -830,6 +901,82 @@ async def speech_to_text(
 				)
 			
 			result = response.json()
+			
+			# Handle hybrid response format
+			hybrid_results = result.get("hybrid_results")
+			if hybrid_results:
+				# Log hybrid analysis for debugging
+				print(f"🎯 Chat hybrid transcription completed:")
+				print(f"   Model used: {result.get('model_used', 'unknown')}")
+				print(f"   Confidence: {result.get('confidence', 0.0)}")
+				print(f"   Models compared: {hybrid_results.get('models_compared', 0)}")
+				if hybrid_results.get('similarity'):
+					print(f"   Similarity: {hybrid_results['similarity']:.2f}")
+			
+			return SpeechToTextResponse(
+				text=result["text"],
+				language=result["language"],
+				confidence=result.get("confidence")
+			)
+			
+	except httpx.RequestError as e:
+		raise HTTPException(status_code=503, detail=f"Speech-to-text service unavailable: {str(e)}")
+	except Exception as e:
+		raise HTTPException(status_code=500, detail=f"Speech-to-text failed: {str(e)}")
+
+@app.post("/api/speech-to-text", response_model=SpeechToTextResponse)
+async def speech_to_text(
+	audio_file: UploadFile = File(...),
+	language: str = Form("fa"),
+	use_hybrid: bool = Form(True),
+	model_preference: str = Form("auto")
+) -> SpeechToTextResponse:
+	"""Convert speech to text using the hybrid Persian speech-to-text microservice"""
+	try:
+		# Prepare form data for the speech-to-text service
+		files = {"audio_file": (audio_file.filename, await audio_file.read(), audio_file.content_type)}
+		
+		# Choose endpoint based on hybrid preference
+		if use_hybrid:
+			endpoint = "http://localhost:8001/transcribe-hybrid"
+			data = {
+				"language": language, 
+				"model_preference": model_preference
+			}
+		else:
+			endpoint = "http://localhost:8001/transcribe"
+			data = {
+				"language": language, 
+				"model_size": "large"
+			}
+		
+		# Call the speech-to-text microservice
+		async with httpx.AsyncClient(timeout=120.0) as client:  # Increased timeout for hybrid processing
+			response = await client.post(
+				endpoint,
+				files=files,
+				data=data
+			)
+			
+			if response.status_code != 200:
+				raise HTTPException(
+					status_code=response.status_code,
+					detail=f"Speech-to-text service error: {response.text}"
+				)
+			
+			result = response.json()
+			
+			# Handle hybrid response format
+			hybrid_results = result.get("hybrid_results")
+			if hybrid_results:
+				# Log hybrid analysis for debugging
+				print(f"🎯 Hybrid transcription completed:")
+				print(f"   Model used: {result.get('model_used', 'unknown')}")
+				print(f"   Confidence: {result.get('confidence', 0.0)}")
+				print(f"   Models compared: {hybrid_results.get('models_compared', 0)}")
+				if hybrid_results.get('similarity'):
+					print(f"   Similarity: {hybrid_results['similarity']:.2f}")
+			
 			return SpeechToTextResponse(
 				text=result["text"],
 				language=result["language"],

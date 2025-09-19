@@ -117,6 +117,7 @@ function App() {
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [chatLoading, setChatLoading] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [speechModels, setSpeechModels] = useState<any>(null)
   const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
   const [darkMode, setDarkMode] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -301,6 +302,37 @@ function App() {
       setModelReferee(fallbackModels[2])
     } finally {
       setModelsLoading(false)
+    }
+    
+    // Also load speech models
+    await loadSpeechModels()
+  }
+
+  // Load speech models status
+  const loadSpeechModels = async () => {
+    try {
+      // Load general speech models
+      const response = await fetchWithTimeout('/api/speech-models', {
+        method: 'GET',
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setSpeechModels(data)
+        console.log('🎯 Speech models loaded:', data)
+      }
+      
+      // Also load chatbot-specific status
+      const chatResponse = await fetchWithTimeout('/api/chat-speech-status', {
+        method: 'GET',
+      })
+      
+      if (chatResponse.ok) {
+        const chatData = await chatResponse.json()
+        console.log('🎯 Chat speech status loaded:', chatData)
+      }
+    } catch (e) {
+      console.error('Failed to load speech models:', e)
     }
   }
 
@@ -746,12 +778,14 @@ function App() {
     try {
       setChatLoading(true)
       
-      // Convert audio to text using speech-to-text service
+      // Convert audio to text using hybrid speech-to-text service via backend
       const formData = new FormData()
       formData.append('audio_file', audioFile, 'uploaded_audio.wav')
       formData.append('language', language)
+      formData.append('use_hybrid', 'true')
+      formData.append('model_preference', 'auto')
       
-      const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+      const response = await fetchWithTimeout('/api/chat-speech-to-text', {
         method: 'POST',
         body: formData,
       })
@@ -804,10 +838,12 @@ function App() {
       setLoading(true)
       setError(null)
 
-      // Convert audio to text using speech-to-text service
+      // Convert audio to text using hybrid speech-to-text service
       const formData = new FormData()
-      formData.append('audio', audioFile)
+      formData.append('audio_file', audioFile)
       formData.append('language', language)
+      formData.append('use_hybrid', 'true')
+      formData.append('model_preference', 'auto')
 
       const response = await fetchWithTimeout('/api/speech-to-text', {
         method: 'POST',
@@ -853,12 +889,13 @@ function App() {
             setLoading(true)
             setError(null)
             
-            // Send audio to speech-to-text service
+            // Send audio to hybrid speech-to-text service
             const formData = new FormData()
             formData.append('audio_file', blob, 'recording.wav')
             formData.append('language', language)
+            formData.append('model_preference', 'auto')
             
-            const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+            const response = await fetchWithTimeout('http://localhost:8001/transcribe-hybrid', {
               method: 'POST',
               body: formData,
             })
@@ -902,12 +939,14 @@ function App() {
           setTimeout(() => scrollToBottom(), 100)
           
           try {
-            // Send audio to speech-to-text service
+            // Send audio to hybrid speech-to-text service via backend
             const formData = new FormData()
             formData.append('audio_file', blob, 'recording.wav')
             formData.append('language', language)
+            formData.append('use_hybrid', 'true')
+            formData.append('model_preference', 'auto')
             
-            const response = await fetchWithTimeout('http://localhost:8001/transcribe-chat', {
+            const response = await fetchWithTimeout('/api/chat-speech-to-text', {
               method: 'POST',
               body: formData,
             })
@@ -1417,6 +1456,11 @@ function App() {
                 <button className='btn btn-outline' onClick={loadModels} disabled={modelsLoading || !!file} title='بارگیری مجدد مدل‌ها'>
                   {modelsLoading ? 'بارگیری...' : 'بارگیری مدل‌ها'}
                 </button>
+                {speechModels && (
+                  <div className='speech-models-status' style={{marginTop: '8px', fontSize: '0.875rem', color: '#6b7280'}}>
+                    🎯 مدل‌های صدا: {speechModels.hybrid_mode === 'available' ? '✅ هیبرید فعال' : '⚠️ فقط Whisper'}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1762,7 +1806,7 @@ function App() {
                     className={`btn ${isRecording ? 'btn-secondary' : 'btn-outline'} chat-voice-btn`}
                     onClick={isRecording ? stopRecording : startRecording}
                     disabled={chatLoading}
-                    title={isRecording ? 'توقف ضبط' : 'شروع ضبط صدا'}
+                    title={isRecording ? 'توقف ضبط' : 'شروع ضبط صدا (مدل هیبرید فارسی)'}
                   >
                     {isRecording ? '⏹ توقف ضبط' : '🎙 ضبط صدا'}
                   </button>
@@ -1779,10 +1823,15 @@ function App() {
                   <label 
                     htmlFor='chat-audio-input' 
                     className={`btn btn-outline chat-audio-upload-btn ${chatLoading ? 'disabled' : ''}`}
-                    title='آپلود فایل صوتی'
+                    title='آپلود فایل صوتی (مدل هیبرید فارسی)'
                   >
                     🎵 آپلود صدا
                   </label>
+                  {speechModels && (
+                    <div className='chat-speech-status' style={{fontSize: '0.75rem', color: '#6b7280', marginTop: '4px'}}>
+                      {speechModels.hybrid_mode === 'available' ? '🎯 هیبرید فعال' : '⚠️ فقط Whisper'}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
