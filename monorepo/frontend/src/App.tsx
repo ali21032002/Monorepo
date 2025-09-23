@@ -441,9 +441,82 @@ function App() {
     window.open(url, '_blank')
   }
 
+  // Chart request detection function
+  const detectChartRequest = (message: string): string | null => {
+    const messageLower = message.toLowerCase()
+    
+    // Direct chart request keywords
+    const directChartKeywords = [
+      'نمودار', 'چارت', 'گراف', 'chart', 'graph',
+      'رسم کن', 'بکش', 'نشان بده', 'نمایش بده',
+      'تصویری نشان بده', 'بصری نشان بده'
+    ]
+    
+    // Strong indicators for chart requests
+    const strongIndicators = [
+      'نمودار بکش', 'چارت بکش', 'رسم کن', 'نمایش بده',
+      'تصویری نشان بده', 'بصری کن', 'گراف بکش',
+      'نمودار رسم کن'
+    ]
+    
+    // Check for strong indicators first
+    for (const indicator of strongIndicators) {
+      if (messageLower.includes(indicator)) {
+        return 'strong_request'
+      }
+    }
+    
+    // Check for direct chart keywords
+    const directCount = directChartKeywords.filter(keyword => messageLower.includes(keyword)).length
+    if (directCount > 0) {
+      return 'direct_request'
+    }
+    
+    // Check for analytical content that might benefit from charts
+    // BUT ONLY if there are actual numbers or data to visualize
+    const analyticalPatterns = [
+      'مقایسه', 'تفاوت', 'بیشتر', 'کمتر', 'برتر', 'بدتر',
+      'درصد', 'تعداد', 'مقدار', 'میزان', 'سطح', 'نرخ',
+      'افزایش', 'کاهش', 'روند', 'تغییر', 'پیشرفت'
+    ]
+    
+    // Check for actual numbers or quantitative data
+    const hasNumbers = /\d+/.test(message)
+    const hasDataWords = ['آمار', 'داده', 'statistics', 'data', 'dataset', 'عدد', 'رقم', 'اعداد'].some(word => messageLower.includes(word))
+    
+    const analyticalCount = analyticalPatterns.filter(pattern => messageLower.includes(pattern)).length
+    
+    // Only suggest chart for analytical content if there are actual numbers or data
+    if (analyticalCount >= 2 && (hasNumbers || hasDataWords)) {
+      return 'analytical_content'
+    }
+    
+    return null
+  }
+
+  // Get chart request indicator message
+  const getChartRequestIndicator = (requestType: string): string => {
+    switch (requestType) {
+      case 'strong_request':
+        return '📊 درخواست نمودار تشخیص داده شد! در حال آماده‌سازی نمودار برای شما...'
+      case 'direct_request':
+        return '📈 درخواست رسم نمودار دریافت شد. لطفاً کمی صبر کنید...'
+      case 'analytical_content':
+        return '📊 محتوای تحلیلی با داده‌های عددی تشخیص داده شد. نمودار ارائه خواهد شد.'
+      default:
+        return '📊 درخواست نمایش بصری در حال پردازش...'
+    }
+  }
+
   // Chat functions
   const sendChatMessage = async (message: string, isAudio = false, audioUrl?: string) => {
     if (!message.trim() && !isAudio) return
+    
+    // Detect chart request
+    const chartRequestType = detectChartRequest(message)
+    if (chartRequestType) {
+      console.log(`📊 Chart request detected in frontend: ${chartRequestType}`)
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -462,7 +535,7 @@ function App() {
     setTimeout(() => scrollToBottom(), 100)
 
     try {
-      // Smart message history management
+      // Enhanced message history management with importance weighting
       const prepareMessageHistory = (messages: ChatMessage[]) => {
         // Exclude the current user message that was just added
         const previousMessages = messages.slice(0, -1)
@@ -475,41 +548,87 @@ function App() {
           }))
         }
         
-        // For longer conversations, use a smart selection strategy:
-        // 1. Always include the first 2 messages (context establishment)
-        // 2. Include the last 8 messages (recent context)
-        // 3. Try to include important messages (containing names, key info)
+        // Enhanced selection strategy with importance weighting:
+        // 1. Calculate importance scores for all messages
+        // 2. Prioritize newer messages with higher coefficients
+        // 3. Boost messages with history references
+        // 4. Select based on combined importance scores
+        
+        const calculateMessageImportance = (msg: ChatMessage, index: number, total: number) => {
+          let score = 0
+          const content = msg.content.toLowerCase()
+          
+          // Recency weight - newer messages get higher scores (exponential boost)
+          const recencyWeight = 1.0 + (index / total) * 1.2  // 1.0 to 2.2 range
+          score += recencyWeight * 10
+          
+          // Content importance
+          const highImportanceKeywords = ['نام', 'اسم', 'کیه', 'کیست', 'کجا', 'چطور', 'چرا', 'چگونه', 'مشکل', 'خطا', 'اشتباه', 'کمک', 'راهنمایی', 'تحلیل', 'بررسی', 'نمودار', 'توضیح', 'پیشنهاد', 'نتیجه', 'مهم', 'ضروری', 'اولویت']
+          const mediumImportanceKeywords = ['سوال', 'پاسخ', 'جواب', 'درباره', 'راجع', 'موضوع', 'بحث']
+          
+          // Count keyword matches
+          const highMatches = highImportanceKeywords.filter(keyword => content.includes(keyword)).length
+          const mediumMatches = mediumImportanceKeywords.filter(keyword => content.includes(keyword)).length
+          
+          score += highMatches * 8  // High importance keywords
+          score += mediumMatches * 4  // Medium importance keywords
+          
+          // History reference boost - VERY IMPORTANT
+          const historyKeywords = ['قبلا', 'قبل', 'پیش', 'سابقه', 'تاریخچه', 'مکالمه قبل', 'پیام قبل', 'گفتم', 'گفتی', 'گفته', 'یادت', 'یادم', 'یاد', 'همون', 'همان', 'آن چیزی', 'اون چیزی']
+          const historyMatches = historyKeywords.filter(keyword => content.includes(keyword)).length
+          if (historyMatches > 0) {
+            score += historyMatches * 15  // Major boost for history references
+            console.log(`📊 History reference detected in message ${index}: "${msg.content.substring(0, 50)}..." (boost: +${historyMatches * 15})`)
+          }
+          
+          // Question boost
+          if (content.includes('؟') || content.includes('?')) {
+            score += 6
+          }
+          
+          // Length boost for detailed messages
+          if (msg.content.length > 100) score += 3
+          if (msg.content.length > 200) score += 3
+          
+          // Name/identity patterns
+          const namePatterns = ['نام من', 'اسم من', 'من .+ هستم']
+          if (namePatterns.some(pattern => new RegExp(pattern).test(content))) {
+            score += 10
+          }
+          
+          return { message: msg, score, index, recencyWeight, historyMatches }
+        }
+        
+        // Calculate importance for all messages
+        const scoredMessages = previousMessages.map((msg, index) => 
+          calculateMessageImportance(msg, index, previousMessages.length)
+        )
+        
+        // Sort by importance score
+        scoredMessages.sort((a, b) => b.score - a.score)
+        
+        // Log top scoring messages
+        console.log('📊 Top 5 most important messages:')
+        scoredMessages.slice(0, 5).forEach((scored, i) => {
+          console.log(`  ${i+1}. Score: ${scored.score.toFixed(1)} (Recency: ${scored.recencyWeight.toFixed(2)}, History refs: ${scored.historyMatches}) - "${scored.message.content.substring(0, 50)}..."`)
+        })
         
         const importantMessages = []
         
-        // Add first 3 messages for context
-        if (previousMessages.length >= 3) {
-          importantMessages.push(...previousMessages.slice(0, 3))
-        }
-        
-        // Add last 10 messages for recent context
-        const recentMessages = previousMessages.slice(-10)
+        // Always include the most recent 6 messages (highest recency weight)
+        const recentMessages = previousMessages.slice(-6)
         importantMessages.push(...recentMessages)
         
-        // Try to include important messages from the middle
-        if (previousMessages.length > 13) {
-          const middleMessages = previousMessages.slice(3, -10)
-          const importantKeywords = ['نام', 'اسم', 'کیه', 'کیست', 'کجا', 'چطور', 'چرا', 'چگونه', 'مشکل', 'خطا', 'اشتباه', 'کمک', 'راهنمایی', 'تحلیل', 'بررسی', 'نمودار', 'توضیح', 'پیشنهاد', 'نتیجه']
-          
-          for (const msg of middleMessages) {
-            const content = msg.content.toLowerCase()
-            const hasImportantKeyword = importantKeywords.some(keyword => content.includes(keyword))
-            const isLongMessage = msg.content.length > 50
-            const hasQuestion = content.includes('؟') || content.includes('?')
-            const hasName = /نام\s+من|اسم\s+من|من\s+\w+\s+هستم/.test(content)
-            
-            if (hasImportantKeyword || isLongMessage || hasQuestion || hasName) {
-              importantMessages.push(msg)
-            }
-          }
-        }
+        // Add high-scoring messages from the rest
+        const remainingMessages = scoredMessages.filter(scored => 
+          !recentMessages.some(recent => recent.content === scored.message.content)
+        )
         
-        // Remove duplicates while preserving order
+        // Take top 12 remaining messages by importance
+        const additionalMessages = remainingMessages.slice(0, 12).map(scored => scored.message)
+        importantMessages.push(...additionalMessages)
+        
+        // Remove duplicates while preserving chronological order
         const uniqueMessages = []
         const seen = new Set()
         
@@ -517,21 +636,35 @@ function App() {
           const key = `${msg.type}-${msg.content.substring(0, 50)}`
           if (!seen.has(key)) {
             seen.add(key)
-            uniqueMessages.push({
-              role: msg.type === 'user' ? 'user' : 'assistant',
-              content: msg.content
-            })
+            uniqueMessages.push(msg)
           }
         }
         
-        // Limit to 18 messages to allow more context for better continuity
-        const finalMessages = uniqueMessages.slice(-18)
+        // Sort by original message order (chronological) to maintain conversation flow
+        uniqueMessages.sort((a, b) => {
+          const aIndex = previousMessages.findIndex(m => m.content === a.content)
+          const bIndex = previousMessages.findIndex(m => m.content === b.content)
+          return aIndex - bIndex
+        })
         
-        // Log selection strategy
-        console.log(`📝 Enhanced message selection: ${previousMessages.length} total → ${finalMessages.length} selected`)
-        console.log(`📝 Selection strategy: First 3 + Last 10 + Important middle messages (enhanced criteria)`)
+        // Convert to API format
+        const finalMessages = uniqueMessages.map(msg => ({
+          role: msg.type === 'user' ? 'user' : 'assistant',
+          content: msg.content
+        }))
         
-        return finalMessages
+        // Limit to 20 messages for better context while maintaining performance
+        const limitedMessages = finalMessages.slice(-20)
+        
+        // Enhanced logging
+        console.log(`📊 Enhanced message selection with importance weighting:`)
+        console.log(`  📝 Total messages: ${previousMessages.length}`)
+        console.log(`  📝 Selected messages: ${limitedMessages.length}`)
+        console.log(`  📝 Recent messages (high priority): ${recentMessages.length}`)
+        console.log(`  📝 Additional important messages: ${additionalMessages.length}`)
+        console.log(`  📝 Messages with history references: ${scoredMessages.filter(s => s.historyMatches > 0).length}`)
+        
+        return limitedMessages
       }
       
       const recentMessages = prepareMessageHistory(chatMessages)
