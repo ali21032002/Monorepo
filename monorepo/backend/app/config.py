@@ -5,7 +5,7 @@ OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma3:4b")
 REQUEST_TIMEOUT_SECONDS: int = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "120"))
 TEMPERATURE: float = float(os.getenv("TEMPERATURE", "0"))
-MAX_OUTPUT_TOKENS: int = int(os.getenv("MAX_OUTPUT_TOKENS", "1024"))
+MAX_OUTPUT_TOKENS: int = int(os.getenv("MAX_OUTPUT_TOKENS", "2048"))
 
 # Input chunking & context window
 NUM_CTX: int = int(os.getenv("NUM_CTX", os.getenv("CONTEXT_WINDOW", "4096")))

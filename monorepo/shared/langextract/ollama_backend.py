@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 try:
@@ -8,13 +9,103 @@ except Exception:  # pragma: no cover
 	Client = None  # type: ignore
 
 
+def calculate_message_importance(content: str) -> float:
+	"""Calculate importance weight for a message based on its content.
+	
+	Returns a weight between 1.0 (normal) and 2.0 (very important).
+	"""
+	content_lower = content.lower()
+	weight = 1.0
+	
+	# High importance keywords
+	high_importance_keywords = [
+		'نام', 'اسم', 'کیه', 'کیست', 'کجا', 'چطور', 'چرا', 'چگونه',
+		'مشکل', 'خطا', 'اشتباه', 'کمک', 'راهنمایی', 'تحلیل', 'بررسی',
+		'نمودار', 'توضیح', 'پیشنهاد', 'نتیجه', 'مهم', 'ضروری', 'اولویت'
+	]
+	
+	# Medium importance keywords
+	medium_importance_keywords = [
+		'سوال', 'پاسخ', 'جواب', 'درباره', 'راجع', 'موضوع', 'بحث'
+	]
+	
+	# Count high importance keywords
+	high_count = sum(1 for keyword in high_importance_keywords if keyword in content_lower)
+	medium_count = sum(1 for keyword in medium_importance_keywords if keyword in content_lower)
+	
+	# Boost weight based on keyword presence
+	weight += high_count * 0.3  # Each high importance keyword adds 0.3
+	weight += medium_count * 0.15  # Each medium importance keyword adds 0.15
+	
+	# Boost for questions
+	if '؟' in content or '?' in content:
+		weight += 0.2
+	
+	# Boost for long messages (more detail = more important)
+	if len(content) > 100:
+		weight += 0.1
+	if len(content) > 200:
+		weight += 0.1
+	
+	# Boost for messages with names/identities
+	name_patterns = [r'نام\s+من', r'اسم\s+من', r'من\s+\w+\s+هستم', r'\w+\s+هستم']
+	for pattern in name_patterns:
+		if re.search(pattern, content_lower):
+			weight += 0.4
+			break
+	
+	# Cap at 2.0 maximum
+	return min(weight, 2.0)
+
+
+def calculate_history_reference_weight(content: str) -> float:
+	"""Calculate weight boost when user references chat history.
+	
+	Returns a weight between 1.0 (no reference) and 1.8 (strong reference).
+	"""
+	content_lower = content.lower()
+	weight = 1.0
+	
+	# Direct history reference keywords
+	history_keywords = [
+		'قبلا', 'قبل', 'پیش', 'سابقه', 'تاریخچه', 'مکالمه قبل', 'پیام قبل',
+		'گفتم', 'گفتی', 'گفته', 'صحبت کرد', 'بحث کرد', 'اشاره کرد',
+		'یادت', 'یادم', 'یاد', 'به یاد', 'یادآوری', 'یادداشت',
+		'همون', 'همان', 'آن چیزی', 'اون چیزی', 'همین', 'این که'
+	]
+	
+	# Strong reference patterns
+	strong_patterns = [
+		r'قبلا\s+(گفت|بحث|صحبت)',
+		r'(یادت|یادم)\s+(هست|نیست|میاد)',
+		r'(همون|همان|اون)\s+که\s+(گفت|بحث)',
+		r'(مثل|مانند)\s+(قبل|پیش)',
+		r'(برگرد|برگردیم)\s+به\s+(قبل|پیش|سابقه)'
+	]
+	
+	# Count history references
+	history_count = sum(1 for keyword in history_keywords if keyword in content_lower)
+	strong_count = sum(1 for pattern in strong_patterns if re.search(pattern, content_lower))
+	
+	# Apply weight boosts
+	weight += history_count * 0.15  # Each history keyword adds 0.15
+	weight += strong_count * 0.3    # Each strong pattern adds 0.3
+	
+	# Special boost for direct references to previous conversation
+	if any(phrase in content_lower for phrase in ['قبلا گفت', 'پیش گفت', 'سابقه مکالمه', 'مکالمه قبل']):
+		weight += 0.4
+	
+	# Cap at 1.8 maximum
+	return min(weight, 1.8)
+
+
 def chat_json(
 	*,
 	system_prompt: str,
 	user_prompt: str,
 	model: str,
 	temperature: float = 0.0,
-	max_output_tokens: int = 1024,
+	max_output_tokens: int = 2048,
 	request_timeout_seconds: Optional[int] = None,
 	num_ctx: Optional[int] = None,
 ) -> str:
@@ -82,13 +173,14 @@ def chat_conversational(
 	model: str,
 	message_history: Optional[List[Dict[str, str]]] = None,
 	temperature: float = 0.0,
-	max_output_tokens: int = 1024,
+	max_output_tokens: int = 2048,
 	request_timeout_seconds: Optional[int] = None,
 	num_ctx: Optional[int] = None,
 ) -> str:
 	"""Call Ollama chat with conversation history and return response string.
 
 	This function supports conversational chat with message history.
+	Messages are weighted by recency and importance for better context understanding.
 	"""
 	host = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 	if Client is None:
@@ -100,22 +192,54 @@ def chat_conversational(
 		{"role": "system", "content": system_prompt},
 	]
 	
-	# Add message history if provided
+	# Add message history if provided with weighting
 	if message_history:
 		print(f"📝 Adding {len(message_history)} history messages to context")
-		# Validate and clean message history
+		# Validate and clean message history with importance weighting
 		valid_history = []
-		for msg in message_history:
+		weighted_messages = []
+		
+		for i, msg in enumerate(message_history):
 			if isinstance(msg, dict) and "role" in msg and "content" in msg:
 				if msg["role"] in ["user", "assistant"] and msg["content"].strip():
+					# Calculate recency weight (newer messages get higher weight)
+					recency_weight = 1.0 + (i / len(message_history)) * 0.5  # 1.0 to 1.5 range
+					
+					# Calculate importance weight based on content
+					importance_weight = calculate_message_importance(msg["content"])
+					
+					# Calculate history reference weight
+					history_ref_weight = calculate_history_reference_weight(msg["content"])
+					
+					# Final weight combines all factors
+					final_weight = recency_weight * importance_weight * history_ref_weight
+					
+					weighted_msg = {
+						"role": msg["role"],
+						"content": msg["content"].strip(),
+						"weight": final_weight,
+						"recency": recency_weight,
+						"importance": importance_weight,
+						"history_ref": history_ref_weight
+					}
+					
+					weighted_messages.append(weighted_msg)
 					valid_history.append({
 						"role": msg["role"],
 						"content": msg["content"].strip()
 					})
 		
 		if valid_history:
+			# Sort messages by weight for context prioritization
+			weighted_messages.sort(key=lambda x: x["weight"], reverse=True)
+			
+			# Log weighting analysis
+			print(f"📝 Message weighting analysis:")
+			for i, wmsg in enumerate(weighted_messages[:5]):  # Show top 5
+				print(f"  {i+1}. Weight: {wmsg['weight']:.2f} (R:{wmsg['recency']:.2f}, I:{wmsg['importance']:.2f}, H:{wmsg['history_ref']:.2f}) - {wmsg['content'][:50]}...")
+			
 			messages.extend(valid_history)
-			print(f"📝 Added {len(valid_history)} valid history messages")
+			print(f"📝 Added {len(valid_history)} valid history messages with importance weighting")
 		else:
 			print("📝 No valid history messages found")
 	

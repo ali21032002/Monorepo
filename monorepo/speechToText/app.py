@@ -36,6 +36,33 @@ app.add_middleware(
 whisper_model = None
 hf_models = {}
 
+def diagnose_environment():
+    """Diagnose PyTorch and CUDA environment"""
+    print("🔍 Environment Diagnosis:")
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"GPU count: {torch.cuda.device_count()}")
+        print(f"Current device: {torch.cuda.current_device()}")
+        print(f"Device name: {torch.cuda.get_device_name()}")
+        print(f"Memory allocated: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
+        print(f"Memory reserved: {torch.cuda.memory_reserved() / 1024**3:.2f} GB")
+    
+    # Check transformers version
+    try:
+        import transformers
+        print(f"Transformers version: {transformers.__version__}")
+    except ImportError:
+        print("Transformers not available")
+    
+    # Check whisper version
+    try:
+        import whisper
+        print(f"Whisper available: True")
+    except ImportError:
+        print("Whisper not available")
+
 # Persian models configuration (Hugging Face)
 PERSIAN_MODELS = {
     "whisper_fa": "vhdm/whisper-large-fa-v1",
@@ -61,22 +88,95 @@ class HybridTranscriptionRequest(BaseModel):
     model_preference: Optional[str] = None  # "persian_voice", "whisper_fa", or "auto"
 
 def load_whisper_model(model_size: str = "base"):
-    """Load Whisper model with caching"""
+    """Load Whisper model with caching and comprehensive error handling"""
     global whisper_model
     
     if whisper_model is None:
         print(f"Loading Whisper model: {model_size}")
+        
+        # Clear GPU cache before loading
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            print("🧹 Cleared GPU cache before Whisper model loading")
+        
+        # Strategy 1: Try normal loading first
         try:
             whisper_model = whisper.load_model(model_size)
-            print(f"Whisper model {model_size} loaded successfully")
+            print(f"✅ Whisper model {model_size} loaded successfully (normal method)")
+            return whisper_model
+            
         except Exception as e:
-            print(f"Error loading Whisper model: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to load Whisper model: {str(e)}")
+            print(f"❌ Normal Whisper loading failed: {e}")
+            
+            # Strategy 2: Force CPU loading if meta tensor error
+            if "meta tensor" in str(e).lower() or "to_empty" in str(e).lower():
+                print("🔧 Detected meta tensor issue, trying CPU-first approach...")
+                
+                try:
+                    # Temporarily disable CUDA
+                    import os
+                    original_cuda_visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+                    os.environ['CUDA_VISIBLE_DEVICES'] = ''
+                    
+                    # Force reload whisper module to reset any cached GPU settings
+                    import importlib
+                    import whisper
+                    importlib.reload(whisper)
+                    
+                    # Load on CPU
+                    whisper_model = whisper.load_model(model_size)
+                    print(f"✅ Whisper model {model_size} loaded on CPU")
+                    
+                    # Restore CUDA visibility
+                    if original_cuda_visible is not None:
+                        os.environ['CUDA_VISIBLE_DEVICES'] = original_cuda_visible
+                    elif 'CUDA_VISIBLE_DEVICES' in os.environ:
+                        del os.environ['CUDA_VISIBLE_DEVICES']
+                    
+                    # Try to move to GPU if available and desired
+                    if torch.cuda.is_available():
+                        try:
+                            # Clear cache again
+                            torch.cuda.empty_cache()
+                            whisper_model = whisper_model.cuda()
+                            print(f"✅ Successfully moved Whisper model to GPU")
+                        except Exception as gpu_error:
+                            print(f"⚠️ Could not move to GPU, staying on CPU: {gpu_error}")
+                    
+                    return whisper_model
+                    
+                except Exception as cpu_error:
+                    print(f"❌ CPU loading also failed: {cpu_error}")
+                    
+            # Strategy 3: Try with explicit device parameter
+            try:
+                print("🔧 Trying explicit device parameter...")
+                whisper_model = whisper.load_model(model_size, device="cpu")
+                print(f"✅ Whisper model {model_size} loaded with explicit CPU device")
+                return whisper_model
+                
+            except Exception as device_error:
+                print(f"❌ Device-explicit loading failed: {device_error}")
+                
+            # Strategy 4: Try smaller model as fallback
+            if model_size == "large":
+                print("🔧 Trying smaller model as fallback...")
+                try:
+                    whisper_model = whisper.load_model("medium", device="cpu")
+                    print(f"⚠️ Loaded medium model instead of large due to errors")
+                    return whisper_model
+                except Exception as fallback_error:
+                    print(f"❌ Fallback to medium model also failed: {fallback_error}")
+            
+            # All strategies failed
+            error_msg = f"All Whisper loading strategies failed. Original error: {str(e)}"
+            print(f"❌ {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
     
     return whisper_model
 
 def load_huggingface_model(model_name: str):
-    """Load Hugging Face Persian model"""
+    """Load Hugging Face Persian model with proper error handling"""
     global hf_models
     
     if not HF_AVAILABLE:
@@ -96,13 +196,66 @@ def load_huggingface_model(model_name: str):
             ]
             
             if model_name in verified_models:
-                # Load Whisper-based model
-                pipe = pipeline(
-                    "automatic-speech-recognition",
-                    model=model_name,
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-                    device=0 if torch.cuda.is_available() else -1
-                )
+                # Load Whisper-based model with proper device handling
+                try:
+                    # First try to load without specific device mapping to avoid meta tensor issues
+                    pipe = pipeline(
+                        "automatic-speech-recognition",
+                        model=model_name,
+                        torch_dtype=torch.float32,  # Use float32 to avoid precision issues
+                        device=-1  # Force CPU first, then move to GPU if available
+                    )
+                    
+                    # If CUDA is available and we successfully loaded, try to move to GPU
+                    if torch.cuda.is_available():
+                        try:
+                            # Move pipeline model to GPU after loading
+                            pipe.model = pipe.model.to("cuda")
+                            pipe.device = torch.device("cuda")
+                            print(f"✅ Successfully moved {model_name} to GPU")
+                        except Exception as gpu_error:
+                            print(f"⚠️ Could not move {model_name} to GPU, staying on CPU: {gpu_error}")
+                            
+                except Exception as load_error:
+                    print(f"❌ Failed to load {model_name} with pipeline method: {load_error}")
+                    
+                    # Clear GPU cache before fallback attempt
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        print("🧹 Cleared GPU cache before fallback attempt")
+                    
+                    # Fallback: try loading with explicit model and processor
+                    try:
+                        from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor
+                        processor = AutoProcessor.from_pretrained(model_name)
+                        model = AutoModelForSpeechSeq2Seq.from_pretrained(
+                            model_name,
+                            torch_dtype=torch.float32,
+                            low_cpu_mem_usage=True,
+                            use_safetensors=True,
+                            device_map="auto" if torch.cuda.is_available() else None
+                        )
+                        
+                        # If device_map didn't work, manually move to device
+                        if not torch.cuda.is_available() or model.device.type == 'cpu':
+                            device = "cuda" if torch.cuda.is_available() else "cpu"
+                            try:
+                                model = model.to(device)
+                                print(f"✅ Moved {model_name} to {device}")
+                            except Exception as move_error:
+                                print(f"⚠️ Could not move {model_name} to {device}: {move_error}")
+                        
+                        pipe = pipeline(
+                            "automatic-speech-recognition",
+                            model=model,
+                            tokenizer=processor.tokenizer,
+                            feature_extractor=processor.feature_extractor,
+                            device=0 if torch.cuda.is_available() else -1
+                        )
+                        print(f"✅ Successfully loaded {model_name} with fallback method")
+                    except Exception as fallback_error:
+                        print(f"❌ Fallback loading also failed for {model_name}: {fallback_error}")
+                        return None
                 hf_models[model_name] = pipe
                 print(f"✅ Hugging Face model {model_name} loaded successfully")
             else:
@@ -421,6 +574,37 @@ def cleanup_old_temp_files():
                     print(f"Could not clean up old temp file {filename}: {e}")
     except Exception as e:
         print(f"Error during cleanup: {e}")
+
+@app.get("/diagnose")
+def diagnose():
+    """Diagnose environment and return information"""
+    try:
+        info = {
+            "pytorch_version": torch.__version__,
+            "cuda_available": torch.cuda.is_available(),
+            "transformers_available": HF_AVAILABLE
+        }
+        
+        if torch.cuda.is_available():
+            info.update({
+                "cuda_version": torch.version.cuda,
+                "gpu_count": torch.cuda.device_count(),
+                "current_device": torch.cuda.current_device(),
+                "device_name": torch.cuda.get_device_name(),
+                "memory_allocated_gb": torch.cuda.memory_allocated() / 1024**3,
+                "memory_reserved_gb": torch.cuda.memory_reserved() / 1024**3
+            })
+        
+        if HF_AVAILABLE:
+            import transformers
+            info["transformers_version"] = transformers.__version__
+        
+        # Run environment diagnosis in console
+        diagnose_environment()
+        
+        return {"status": "ok", "environment": info}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
 
 @app.get("/health")
 def health_check():
@@ -753,5 +937,8 @@ def get_available_models():
     }
 
 if __name__ == "__main__":
+    # Diagnose environment at startup
+    diagnose_environment()
+    
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)

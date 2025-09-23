@@ -1,5 +1,5 @@
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class Entity(BaseModel):
@@ -27,9 +27,11 @@ class FewShotExample(BaseModel):
 
 # Single model extraction (existing functionality)
 class ExtractionRequest(BaseModel):
+	model_config = ConfigDict(protected_namespaces=())
+	
 	text: str
 	language: Optional[str] = Field(default=None, description="fa or en")
-	schema: Optional[str] = Field(default="general")
+	schema_name: Optional[str] = Field(default="general", alias="schema")
 	examples: Optional[List[FewShotExample]] = None
 	model: Optional[str] = None
 	temperature: Optional[float] = None
@@ -46,6 +48,8 @@ class ExtractionResponse(BaseModel):
 
 # Multi-model analysis models
 class ModelAnalysis(BaseModel):
+	model_config = ConfigDict(protected_namespaces=())
+	
 	model_name: str
 	entities: List[Entity] = Field(default_factory=list)
 	relationships: List[Relationship] = Field(default_factory=list)
@@ -54,6 +58,8 @@ class ModelAnalysis(BaseModel):
 
 
 class MultiModelRequest(BaseModel):
+	model_config = ConfigDict(protected_namespaces=())
+	
 	text: str
 	language: Optional[str] = Field(default="fa", description="fa or en")
 	domain: Optional[str] = Field(default="general", description="Domain: general, legal, medical, police")
@@ -100,6 +106,8 @@ class ChatMessage(BaseModel):
 	content: str
 
 class ChatRequest(BaseModel):
+	model_config = ConfigDict(protected_namespaces=())
+	
 	message: str
 	language: Optional[str] = Field(default="fa", description="fa or en")
 	domain: Optional[str] = Field(default="general", description="Domain: general, legal, medical, police")
