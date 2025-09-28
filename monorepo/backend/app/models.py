@@ -117,6 +117,7 @@ class ChatRequest(BaseModel):
 	model_second: Optional[str] = None
 	model_referee: Optional[str] = None
 	message_history: Optional[List[ChatMessage]] = Field(default_factory=list, description="Previous conversation messages")
+	es_index: Optional[str] = Field(default=None, description="Optional Elasticsearch index to log this chat to")
 
 
 class ChartDataset(BaseModel):

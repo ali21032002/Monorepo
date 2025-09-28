@@ -65,6 +65,14 @@ interface ChatResponse {
   chart?: ChartData | null
 }
 
+// Elasticsearch indices status response shape
+interface EsIndicesResponse {
+  enabled?: boolean
+  configured?: string[]
+  existing?: string[]
+  error?: string
+}
+
 function App() {
   const REQUEST_TIMEOUT_MS = 130000
 
@@ -78,6 +86,26 @@ function App() {
       clearTimeout(id)
     }
   }
+
+  // Fetch Elasticsearch status periodically
+  const refreshEsStatus = async () => {
+    try {
+      setEsLoading(true)
+      const resp = await fetchWithTimeout('/api/reports/indices', { method: 'GET' })
+      const data: EsIndicesResponse = await resp.json()
+      setEsInfo(data)
+    } catch (e) {
+      setEsInfo({ enabled: false, error: (e as Error).message })
+    } finally {
+      setEsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshEsStatus()
+    const t = setInterval(() => refreshEsStatus(), 30000)
+    return () => clearInterval(t)
+  }, [])
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis')
@@ -127,6 +155,10 @@ function App() {
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null)
   const [typingText, setTypingText] = useState('')
 
+  // Elasticsearch status
+  const [esInfo, setEsInfo] = useState<EsIndicesResponse | null>(null)
+  const [esLoading, setEsLoading] = useState<boolean>(false)
+
   // Apply dark mode to body and html
   useEffect(() => {
     if (darkMode) {
@@ -148,6 +180,19 @@ function App() {
 
   // Typing animation function
   const typeText = (text: string, messageId: string, baseSpeed: number = 30) => {
+    // Skip typing animation for messages containing HTML tables
+    if (text.includes('<table') && text.includes('</table>')) {
+      // For table content, show immediately without typing animation
+      setChatMessages(prev => prev.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, content: text }
+          : msg
+      ))
+      // Scroll to bottom immediately
+      setTimeout(() => scrollToBottom(), 100)
+      return
+    }
+    
     setTypingMessageId(messageId)
     setTypingText('')
     
@@ -454,9 +499,10 @@ function App() {
     
     // Strong indicators for chart requests
     const strongIndicators = [
-      'نمودار بکش', 'چارت بکش', 'رسم کن', 'نمایش بده',
-      'تصویری نشان بده', 'بصری کن', 'گراف بکش',
-      'نمودار رسم کن'
+      'نمودار بکش', 'چارت بکش', 'رسم کن', 'گراف بکش',
+      'نمودار رسم کن', 'نمودار بده', 'نمودار نمایش بده',
+      'chart draw', 'draw chart', 'visualize this', 'create chart',
+      'نمودار میخوام', 'نمودار می‌خوام', 'chart میخوام'
     ]
     
     // Check for strong indicators first
@@ -1234,6 +1280,20 @@ function App() {
           ) : (
             analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
           )}
+          {/* ES status line */}
+          <div style={{ fontSize: '0.85rem', marginTop: '4px', opacity: 0.9 }}>
+            {esLoading ? (
+              'در حال بررسی اتصال پایگاه داده...'
+            ) : esInfo?.enabled ? (
+              esInfo?.error ? (
+                `اتصال پایگاه داده: خطا (${esInfo.error})`
+              ) : (
+                `اتصال پایگاه داده: فعال • ایندکس‌ها: ${esInfo.configured && esInfo.configured.length > 0 ? esInfo.configured.join(', ') : '—'}`
+              )
+            ) : (
+              'اتصال پایگاه داده: غیرفعال'
+            )}
+          </div>
         </div>
       </div>
 
@@ -1792,12 +1852,22 @@ function App() {
                             <source src={msg.audioUrl} type='audio/wav' />
                           </audio>
                         )}
-                        <p>
-                          {typingMessageId === msg.id ? typingText : msg.content}
-                          {typingMessageId === msg.id && (
-                            <span className="typing-cursor">|</span>
-                          )}
-                        </p>
+                        {msg.type === 'assistant' ? (
+                          <div 
+                            dangerouslySetInnerHTML={{ 
+                              __html: (typingMessageId === msg.id ? typingText : msg.content)
+                                .trim()  // Remove leading/trailing whitespace
+                                .replace(/\n/g, '<br />')
+                            }} 
+                          />
+                        ) : (
+                          <p>
+                            {typingMessageId === msg.id ? typingText : msg.content}
+                            {typingMessageId === msg.id && (
+                              <span className="typing-cursor">|</span>
+                            )}
+                          </p>
+                        )}
                         
                         {/* Display chart if available */}
                         {msg.chart && msg.type === 'assistant' && (

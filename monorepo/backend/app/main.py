@@ -10,6 +10,8 @@ from fastapi.responses import HTMLResponse
 from . import config
 from .models import ExtractionRequest, ExtractionResponse, SchemasResponse, MultiModelRequest, MultiModelResponse, DomainsResponse, ModelAnalysis, ChatRequest, ChatResponse, SpeechToTextRequest, SpeechToTextResponse, ChartData, ChartDataset
 from .file_extract import extract_text_from_file
+from . import es as esmod
+from .es_query_handler import ESQueryHandler
 
 # Add shared package to sys.path
 CURRENT_DIR = os.path.dirname(__file__)
@@ -21,7 +23,7 @@ if SHARED_DIR not in sys.path:
 # System Identity Configuration
 SYSTEM_NAME = "گُرِم"
 SYSTEM_NAME_ENGLISH = "Gorem"
-DEVELOPER_NAME = "مهندس سرهنگ علی سلیمی"
+DEVELOPER_NAME = "سرهنگ مهندس علی سلیمی"
 DEVELOPER_NAME_ENGLISH = "Engineer Colonel Ali Salimi"
 ORGANIZATION = "مرکز مدیریت و تحلیل داده فراجا"
 
@@ -47,6 +49,9 @@ from langextract import run_extraction, run_multi_model_analysis, generate_html_
 from langextract.ollama_backend import chat_conversational  # type: ignore
 
 app = FastAPI(title="LangExtract Service", version="0.2.0")
+
+# Initialize ES Query Handler
+es_query_handler = ESQueryHandler()
 
 app.add_middleware(
 	CORSMiddleware,
@@ -174,6 +179,51 @@ def test_chart_parsing():
 		
 	except Exception as e:
 		return {"status": "error", "error": str(e)}
+
+
+@app.get("/api/reports/overview")
+def reports_overview(days: int = 7) -> Dict[str, Any]:
+	"""Aggregate overview from Elasticsearch if enabled"""
+	try:
+		return esmod.reports_overview(days)
+	except Exception as e:
+		return {"enabled": False, "error": str(e)}
+
+
+@app.get("/api/reports/search")
+def reports_search(q: str, size: int = 20) -> Dict[str, Any]:
+	"""Full-text search across user and assistant messages"""
+	try:
+		return esmod.search_messages(q, size=size)
+	except Exception as e:
+		return {"enabled": False, "error": str(e)}
+
+
+@app.get("/api/reports/indices")
+def reports_indices() -> Dict[str, Any]:
+	"""List configured and existing indices in ES (if enabled)."""
+	try:
+		info = esmod.list_indices()
+		# Friendly log to help user understand missing indices
+		if info.get("enabled"):
+			configured = info.get("configured", [])
+			existing = info.get("existing", [])
+			missing = info.get("missing", [])
+			print(f"📚 ES indices → configured={configured} | existing={existing} | missing={missing}")
+		return info
+	except Exception as e:
+		return {"enabled": False, "error": str(e)}
+
+
+@app.get("/api/es/health")
+def es_health() -> Dict[str, Any]:
+	"""Detailed ES connection diagnostics (for logs/UI)."""
+	try:
+		info = esmod.health()
+		print(f"🔎 ES health: {info}")
+		return info
+	except Exception as e:
+		return {"enabled": False, "error": str(e)}
 
 @app.get("/api/chat-speech-status")
 def get_chat_speech_status() -> Dict[str, Any]:
@@ -313,14 +363,15 @@ def detect_chart_request(message: str) -> str:
 		'doughnut': ['حلقه', 'دونات', 'doughnut', 'ring']
 	}
 	
-	# Strong indicators for chart requests
+	# Strong indicators for chart requests - VERY EXPLICIT
 	strong_indicators = [
-		'نمودار بکش', 'چارت بکش', 'رسم کن', 'نمایش بده',
-		'تصویری نشان بده', 'بصری کن', 'گراف بکش',
-		'نمودار رسم کن', 'chart draw', 'visualize this',
+		'نمودار بکش', 'چارت بکش', 'رسم کن', 'گراف بکش',
+		'نمودار رسم کن', 'نمودار بده', 'نمودار نمایش بده',
+		'chart draw', 'draw chart', 'visualize this', 'create chart',
 		'یک نمودار', 'یه نمودار', 'نمودارش را', 'نمودارشو',
 		'به شکل نمودار', 'در قالب نمودار', 'با نمودار نشان بده',
-		'ترسیم کن', 'تصویر کن', 'بصری نشان بده', 'شکل بده'
+		'ترسیم کن', 'تصویر کن', 'بصری نشان بده', 'شکل بده',
+		'نمودار میخوام', 'نمودار می‌خوام', 'chart میخوام'
 	]
 	
 	# Check for strong indicators first
@@ -805,12 +856,145 @@ def chat(req: ChatRequest) -> ChatResponse:
 	analysis_mode = req.analysisMode or "single"
 	model_name = req.model or config.OLLAMA_MODEL
 
-	try:
-		# Detect if user is requesting a chart
-		chart_request_detected = detect_chart_request(req.message)
+	# Detect Elasticsearch intent: list indices
+	def _detect_es_intent(message: str) -> Optional[str]:
+		m = (message or "").lower()
+		keywords_es = [
+			"elasticsearch", "elastic", "الاستیک", "الیستیک", "الاستیک سرچ", "الاسلیک",
+		]
+		keywords_list = ["indices", "index", "ایندکس", "ایندکس ها", "ایندکس‌ها", "فهرست"]
+		keywords_access = ["دسترسی", "کدام", "چه", "لیست", "نمایش"]
+		if any(k in m for k in keywords_es) and any(k in m for k in keywords_list + keywords_access):
+			return "list_indices"
+		return None
+
+	intent = _detect_es_intent(req.message)
+	if intent == "list_indices":
+		try:
+			info = esmod.list_indices()
+		except Exception as e:
+			info = {"enabled": False, "error": str(e)}
+		if not info.get("enabled"):
+			return ChatResponse(message="ElasticSearch غیرفعال است (ES_ENABLED=false). برای فعال‌سازی، تنظیمات .env را بروزرسانی کنید.")
+		if info.get("error"):
+			return ChatResponse(message=f"خطا در بازیابی ایندکس‌ها: {info['error']}")
+		configured = info.get("configured", [])
+		existing = info.get("existing", [])
+		text_lines = [
+			"📚 فهرست ایندکس‌های ElasticSearch:",
+			f"- پیکربندی شده: {', '.join(configured) if configured else '—'}",
+			f"- موجود در کلاستر: {', '.join(existing) if existing else '—'}",
+		]
+		return ChatResponse(message="\n".join(text_lines))
+
+	# Check if this is an ES query using the new advanced handler
+	if es_query_handler.is_enabled():
+		query_params = es_query_handler.parse_query(req.message)
+		
+		# If we detected a known query type, handle it with the advanced handler
+		if query_params.query_type.value != "unknown":
+			result = es_query_handler.execute_query(query_params)
+			formatted_response = es_query_handler.format_response(result, query_params)
+			# Return immediately - don't let it go to chart detection
+			return ChatResponse(message=formatted_response)
+
+		# Legacy ES handling - keeping as fallback
+		# Detect ES count intent (e.g., تعداد رکوردهای ایندکس instagram ...)
+		def _extract_index_for_count(message: str) -> Optional[str]:
+			import re
+			text_raw = (message or "").strip()
+			text = text_raw.lower()
+			# Must look like a counting question
+			if not any(k in text for k in ["تعداد", "count", "چندتا", "چند تا"]):
+				return None
+			if not any(k in text for k in ["رکورد", "سند", "document", "doc", "documents"]):
+				return None
+			# 1) Persian pattern: "ایندکسی که با <name> شروع می شود/میشه"
+			patterns = [
+				r"ایندکس(?:ی)?\s*که\s*با\s*([A-Za-z0-9_.\-]+)\s*شروع\s*می\s*ش(?:ود|ه)",
+				# 2) Persian order variant: "با <name> شروع می شود"
+				r"با\s*([A-Za-z0-9_.\-]+)\s*شروع\s*می\s*ش(?:ود|ه)",
+				# 3) English: "index that starts with <name>"
+				r"index\s+(?:that\s+)?starts\s+with\s+([A-Za-z0-9_.\-]+)",
+				# 4) After the word index/ایندکس try to capture next token
+				r"(?:ایندکس|index|idx)\s*[:=,\-]?\s*([A-Za-z0-9_.\-]+)"
+			]
+			for pat in patterns:
+				m = re.search(pat, text)
+				if m:
+					name = m.group(1)
+					return f"{name}*"
+			# 5) Fallback: pick the most likely latin token (e.g., instagram)
+			candidates = re.findall(r"[A-Za-z][A-Za-z0-9_.\-]+", text)
+			if candidates:
+				# Prefer longer tokens
+				candidates.sort(key=len, reverse=True)
+				return f"{candidates[0]}*"
+			return None
+
+		idx_hint = _extract_index_for_count(req.message)
+		if idx_hint:
+			# Try direct count by pattern first (ES handles wildcard efficiently)
+			direct = esmod.count_by_pattern(idx_hint)
+			if not direct.get("enabled"):
+				return ChatResponse(message="ElasticSearch غیرفعال است.")
+			if direct.get("error") is None and isinstance(direct.get("count"), int):
+				return ChatResponse(message=f"📊 مجموع رکوردها ({direct.get('pattern')}): {direct.get('count')}")
+			# Fallback to enumerate matches and sum
+			found = esmod.find_indices_like(idx_hint)
+			if not found.get("enabled"):
+				return ChatResponse(message="ElasticSearch غیرفعال است (ES_ENABLED=false). برای فعال‌سازی، تنظیمات .env را بروزرسانی کنید.")
+			matches = found.get("matched", [])
+			if not matches:
+				return ChatResponse(message=f"ایندکسی با الگوی '{idx_hint}' یافت نشد.")
+			cnt = esmod.count_documents(matches)
+			if not cnt.get("enabled"):
+				return ChatResponse(message="ElasticSearch غیرفعال است.")
+			total = cnt.get("total", 0)
+			return ChatResponse(message=f"📊 مجموع رکوردها ({', '.join(matches)}): {total}")
+
+		# Detect ES fetch N documents intent
+		def _extract_fetch_n(message: str) -> Optional[Dict[str, Any]]:
+			import re
+			text = (message or '').strip().lower()
+			# Look for a number near رکورد/records
+			num = None
+			m = re.search(r"(\d{1,4})\s*(?:رکورد|records|docs?)", text)
+			if m:
+				num = int(m.group(1))
+			# Extract index name similar to count
+			name = _extract_index_for_count(message)
+			if name or num:
+				return {"name": name, "size": num or 10}
+			return None
+
+		fetch_req = _extract_fetch_n(req.message)
+		if fetch_req and fetch_req.get("name"):
+			res = esmod.fetch_documents_by_pattern(fetch_req["name"], size=int(fetch_req.get("size", 10)))
+			if not res.get("enabled"):
+				return ChatResponse(message="ElasticSearch غیرفعال است.")
+			if res.get("error"):
+				return ChatResponse(message=f"خطا در دریافت رکوردها: {res.get('error')}")
+			docs = res.get("docs", [])
+			if not docs:
+				return ChatResponse(message=f"رکوردی با الگوی '{res.get('pattern')}' یافت نشد.")
+			# Return compact preview of docs
+			lines = [f"📄 {len(docs)} رکورد اول از '{res.get('pattern')}':"]
+			for d in docs:
+				idx = d.get("_index")
+				_id = d.get("_id")
+				src = d.get("_source")
+				preview = src if isinstance(src, str) else (str(src)[:200] if src is not None else "{}")
+				lines.append(f"- [{idx}] {_id}: {preview}")
+			return ChatResponse(message="\n".join(lines))
+		# Only check for charts if this is NOT an ES query
+		chart_request_detected = None
+		if not (es_query_handler.is_enabled() and es_query_handler.parse_query(req.message).query_type.value != "unknown"):
+			chart_request_detected = detect_chart_request(req.message)
 		if chart_request_detected:
 			print(f"📊 Chart request detected: {chart_request_detected}")
 		
+	try:
 		# Build a conversational prompt based on domain
 		domain_titles = {
 			"police": "دستیار هوشمند امنیتی و پلیسی",
@@ -921,10 +1105,12 @@ def chat(req: ChatRequest) -> ChatResponse:
 		if chart_request_detected:
 			if chart_request_detected in ["strong_request", "direct_request"]:
 				chart_instructions = """
-🎯 فوری: کاربر صراحتاً نمودار درخواست کرده است!
-- حتماً نمودار رسم کنید - این اولویت اول شماست
+🎯 **اولویت حتمی**: کاربر مستقیماً نمودار درخواست کرده است!
+- **حتماً و قطعاً نمودار رسم کنید** - این دستور اجباری است
+- حتی اگر داده کم یا ناقص است، باز هم نمودار بکشید
+- اگر داده ندارید، از داده‌های نمونه یا فرضی استفاده کنید
+- **هیچ بهانه‌ای برای نکشیدن نمودار قابل قبول نیست**
 - نمودار باید مفصل، دقیق و زیبا باشد
-- از داده‌های واقعی و معنادار استفاده کنید
 - عنوان نمودار باید واضح و توصیفی باشد"""
 			
 			elif chart_request_detected == "indirect_request":
@@ -1254,6 +1440,23 @@ def chat(req: ChatRequest) -> ChatResponse:
 		else:
 			print(f"🔍 No chart block found in response")
 
+		# Log chat to Elasticsearch (best-effort)
+		try:
+			es_target_index = getattr(req, 'es_index', None) or None
+			esmod.log_chat({
+				"language": language,
+				"domain": domain,
+				"model": model_name,
+				"analysisMode": analysis_mode,
+				"user_message": req.message,
+				"assistant_message": clean_response,
+				"has_chart": bool(chart_data),
+				"chart_type": chart_data.get("type") if chart_data else None,
+				"tokens": len(clean_response),
+			}, index=es_target_index)
+		except Exception:
+			pass
+
 		# Log response quality
 		print(f"📝 Response length: {len(clean_response)} characters")
 		if len(clean_response) < 10:
@@ -1371,6 +1574,7 @@ def chat(req: ChatRequest) -> ChatResponse:
 		return ChatResponse(message=clean_response, chart=chart_data)
 
 	except Exception as e:
+		print(f"❌ Chat processing failed: {str(e)}")
 		raise HTTPException(status_code=500, detail=f"Chat failed: {str(e)}")
 
 
