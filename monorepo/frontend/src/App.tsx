@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import './App.css'
 import ChartComponent from './components/ChartComponent'
+import DatabasePopup from './components/DatabasePopup'
 
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
 interface Relationship { id?: string; source_entity_id: string; target_entity_id: string; type: string; attributes?: Record<string, any> }
@@ -147,9 +148,10 @@ function App() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [speechModels, setSpeechModels] = useState<any>(null)
   const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'chat' | 'analysis' | 'general'>('chat')
+  const [databasePopupOpen, setDatabasePopupOpen] = useState(false)
   
   // Typing animation states
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null)
@@ -540,19 +542,6 @@ function App() {
     return null
   }
 
-  // Get chart request indicator message
-  const getChartRequestIndicator = (requestType: string): string => {
-    switch (requestType) {
-      case 'strong_request':
-        return '📊 درخواست نمودار تشخیص داده شد! در حال آماده‌سازی نمودار برای شما...'
-      case 'direct_request':
-        return '📈 درخواست رسم نمودار دریافت شد. لطفاً کمی صبر کنید...'
-      case 'analytical_content':
-        return '📊 محتوای تحلیلی با داده‌های عددی تشخیص داده شد. نمودار ارائه خواهد شد.'
-      default:
-        return '📊 درخواست نمایش بصری در حال پردازش...'
-    }
-  }
 
   // Chat functions
   const sendChatMessage = async (message: string, isAudio = false, audioUrl?: string) => {
@@ -1247,6 +1236,36 @@ function App() {
             >
               ⚙️
             </button>
+            
+            {/* Database Status Indicator */}
+            <div 
+              className={`database-status ${esInfo?.enabled && !esInfo?.error ? 'active' : 'inactive'}`}
+              onClick={() => esInfo?.enabled && !esInfo?.error && setDatabasePopupOpen(true)}
+              title={esInfo?.enabled ? (esInfo?.error ? `خطای پایگاه داده: ${esInfo.error}` : 'مشاهده ساختار پایگاه داده') : 'اتصال به پایگاه داده غیرفعال'}
+            >
+              <span className='db-icon'>🗄️</span>
+              <span className='db-text'>
+                اتصال به پایگاه داده ({esInfo?.enabled && !esInfo?.error ? 'فعال' : 'غیرفعال'})
+              </span>
+            </div>
+
+            {/* Model Status Indicator */}
+            <div className='model-status-indicator'>
+              <div className='status-icon'>
+                {activeTab === 'chat' ? (
+                  chatMode === 'multi' ? '⚖️' : '🤖'
+                ) : (
+                  analysisMode === 'multi' ? '⚖️' : '🤖'
+                )}
+              </div>
+              <div className='status-text'>
+                {activeTab === 'chat' ? (
+                  chatMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+                ) : (
+                  analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+                )}
+              </div>
+            </div>
           </div>
           <div className='header-text'>
             <h1 className='title'>مرکز مدیریت و تحلیل داده فراجا</h1>
@@ -1264,38 +1283,6 @@ function App() {
           </div>
         </div>
       </header>
-
-      {/* Model Status Indicator */}
-      <div className='model-status-indicator'>
-        <div className='status-icon'>
-          {activeTab === 'chat' ? (
-            chatMode === 'multi' ? '⚖️' : '🤖'
-          ) : (
-            analysisMode === 'multi' ? '⚖️' : '🤖'
-          )}
-        </div>
-        <div className='status-text'>
-          {activeTab === 'chat' ? (
-            chatMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
-          ) : (
-            analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
-          )}
-          {/* ES status line */}
-          <div style={{ fontSize: '0.85rem', marginTop: '4px', opacity: 0.9 }}>
-            {esLoading ? (
-              'در حال بررسی اتصال پایگاه داده...'
-            ) : esInfo?.enabled ? (
-              esInfo?.error ? (
-                `اتصال پایگاه داده: خطا (${esInfo.error})`
-              ) : (
-                `اتصال پایگاه داده: فعال • ایندکس‌ها: ${esInfo.configured && esInfo.configured.length > 0 ? esInfo.configured.join(', ') : '—'}`
-              )
-            ) : (
-              'اتصال پایگاه داده: غیرفعال'
-            )}
-          </div>
-        </div>
-      </div>
 
       {/* Settings Popup */}
       {settingsOpen && (
@@ -2041,6 +2028,15 @@ function App() {
           </div>
         </div>
       )}
+      
+      {/* Database Popup */}
+      <div className={darkMode ? 'dark-mode' : ''}>
+        <DatabasePopup 
+          isOpen={databasePopupOpen}
+          onClose={() => setDatabasePopupOpen(false)}
+          esInfo={esInfo}
+        />
+      </div>
     </div>
   )
 }
