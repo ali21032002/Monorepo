@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 import './App.css'
 import ChartComponent from './components/ChartComponent'
+import DatabasePopup from './components/DatabasePopup'
 
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
 interface Relationship { id?: string; source_entity_id: string; target_entity_id: string; type: string; attributes?: Record<string, any> }
@@ -65,6 +66,14 @@ interface ChatResponse {
   chart?: ChartData | null
 }
 
+// Elasticsearch indices status response shape
+interface EsIndicesResponse {
+  enabled?: boolean
+  configured?: string[]
+  existing?: string[]
+  error?: string
+}
+
 function App() {
   const REQUEST_TIMEOUT_MS = 130000
 
@@ -78,6 +87,26 @@ function App() {
       clearTimeout(id)
     }
   }
+
+  // Fetch Elasticsearch status periodically
+  const refreshEsStatus = async () => {
+    try {
+      setEsLoading(true)
+      const resp = await fetchWithTimeout('/api/reports/indices', { method: 'GET' })
+      const data: EsIndicesResponse = await resp.json()
+      setEsInfo(data)
+    } catch (e) {
+      setEsInfo({ enabled: false, error: (e as Error).message })
+    } finally {
+      setEsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    refreshEsStatus()
+    const t = setInterval(() => refreshEsStatus(), 30000)
+    return () => clearInterval(t)
+  }, [])
 
   // Tab navigation
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis')
@@ -119,13 +148,18 @@ function App() {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
   const [speechModels, setSpeechModels] = useState<any>(null)
   const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'chat' | 'analysis' | 'general'>('chat')
+  const [databasePopupOpen, setDatabasePopupOpen] = useState(false)
   
   // Typing animation states
   const [typingMessageId, setTypingMessageId] = useState<string | null>(null)
   const [typingText, setTypingText] = useState('')
+
+  // Elasticsearch status
+  const [esInfo, setEsInfo] = useState<EsIndicesResponse | null>(null)
+  const [esLoading, setEsLoading] = useState<boolean>(false)
 
   // Apply dark mode to body and html
   useEffect(() => {
@@ -148,6 +182,19 @@ function App() {
 
   // Typing animation function
   const typeText = (text: string, messageId: string, baseSpeed: number = 30) => {
+    // Skip typing animation for messages containing HTML tables
+    if (text.includes('<table') && text.includes('</table>')) {
+      // For table content, show immediately without typing animation
+      setChatMessages(prev => prev.map(msg => 
+        msg.id === messageId 
+          ? { ...msg, content: text }
+          : msg
+      ))
+      // Scroll to bottom immediately
+      setTimeout(() => scrollToBottom(), 100)
+      return
+    }
+    
     setTypingMessageId(messageId)
     setTypingText('')
     
@@ -454,9 +501,10 @@ function App() {
     
     // Strong indicators for chart requests
     const strongIndicators = [
-      'نمودار بکش', 'چارت بکش', 'رسم کن', 'نمایش بده',
-      'تصویری نشان بده', 'بصری کن', 'گراف بکش',
-      'نمودار رسم کن'
+      'نمودار بکش', 'چارت بکش', 'رسم کن', 'گراف بکش',
+      'نمودار رسم کن', 'نمودار بده', 'نمودار نمایش بده',
+      'chart draw', 'draw chart', 'visualize this', 'create chart',
+      'نمودار میخوام', 'نمودار می‌خوام', 'chart میخوام'
     ]
     
     // Check for strong indicators first
@@ -494,19 +542,6 @@ function App() {
     return null
   }
 
-  // Get chart request indicator message
-  const getChartRequestIndicator = (requestType: string): string => {
-    switch (requestType) {
-      case 'strong_request':
-        return '📊 درخواست نمودار تشخیص داده شد! در حال آماده‌سازی نمودار برای شما...'
-      case 'direct_request':
-        return '📈 درخواست رسم نمودار دریافت شد. لطفاً کمی صبر کنید...'
-      case 'analytical_content':
-        return '📊 محتوای تحلیلی با داده‌های عددی تشخیص داده شد. نمودار ارائه خواهد شد.'
-      default:
-        return '📊 درخواست نمایش بصری در حال پردازش...'
-    }
-  }
 
   // Chat functions
   const sendChatMessage = async (message: string, isAudio = false, audioUrl?: string) => {
@@ -1201,6 +1236,36 @@ function App() {
             >
               ⚙️
             </button>
+            
+            {/* Database Status Indicator */}
+            <div 
+              className={`database-status ${esInfo?.enabled && !esInfo?.error ? 'active' : 'inactive'}`}
+              onClick={() => esInfo?.enabled && !esInfo?.error && setDatabasePopupOpen(true)}
+              title={esInfo?.enabled ? (esInfo?.error ? `خطای پایگاه داده: ${esInfo.error}` : 'مشاهده ساختار پایگاه داده') : 'اتصال به پایگاه داده غیرفعال'}
+            >
+              <span className='db-icon'>🗄️</span>
+              <span className='db-text'>
+                اتصال به پایگاه داده ({esInfo?.enabled && !esInfo?.error ? 'فعال' : 'غیرفعال'})
+              </span>
+            </div>
+
+            {/* Model Status Indicator */}
+            <div className='model-status-indicator'>
+              <div className='status-icon'>
+                {activeTab === 'chat' ? (
+                  chatMode === 'multi' ? '⚖️' : '🤖'
+                ) : (
+                  analysisMode === 'multi' ? '⚖️' : '🤖'
+                )}
+              </div>
+              <div className='status-text'>
+                {activeTab === 'chat' ? (
+                  chatMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+                ) : (
+                  analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+                )}
+              </div>
+            </div>
           </div>
           <div className='header-text'>
             <h1 className='title'>مرکز مدیریت و تحلیل داده فراجا</h1>
@@ -1218,24 +1283,6 @@ function App() {
           </div>
         </div>
       </header>
-
-      {/* Model Status Indicator */}
-      <div className='model-status-indicator'>
-        <div className='status-icon'>
-          {activeTab === 'chat' ? (
-            chatMode === 'multi' ? '⚖️' : '🤖'
-          ) : (
-            analysisMode === 'multi' ? '⚖️' : '🤖'
-          )}
-        </div>
-        <div className='status-text'>
-          {activeTab === 'chat' ? (
-            chatMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
-          ) : (
-            analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
-          )}
-        </div>
-      </div>
 
       {/* Settings Popup */}
       {settingsOpen && (
@@ -1792,12 +1839,22 @@ function App() {
                             <source src={msg.audioUrl} type='audio/wav' />
                           </audio>
                         )}
-                        <p>
-                          {typingMessageId === msg.id ? typingText : msg.content}
-                          {typingMessageId === msg.id && (
-                            <span className="typing-cursor">|</span>
-                          )}
-                        </p>
+                        {msg.type === 'assistant' ? (
+                          <div 
+                            dangerouslySetInnerHTML={{ 
+                              __html: (typingMessageId === msg.id ? typingText : msg.content)
+                                .trim()  // Remove leading/trailing whitespace
+                                .replace(/\n/g, '<br />')
+                            }} 
+                          />
+                        ) : (
+                          <p>
+                            {typingMessageId === msg.id ? typingText : msg.content}
+                            {typingMessageId === msg.id && (
+                              <span className="typing-cursor">|</span>
+                            )}
+                          </p>
+                        )}
                         
                         {/* Display chart if available */}
                         {msg.chart && msg.type === 'assistant' && (
@@ -1971,6 +2028,15 @@ function App() {
           </div>
         </div>
       )}
+      
+      {/* Database Popup */}
+      <div className={darkMode ? 'dark-mode' : ''}>
+        <DatabasePopup 
+          isOpen={databasePopupOpen}
+          onClose={() => setDatabasePopupOpen(false)}
+          esInfo={esInfo}
+        />
+      </div>
     </div>
   )
 }
