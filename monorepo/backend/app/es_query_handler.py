@@ -37,6 +37,7 @@ class QueryParams:
     aggregation_field: Optional[str] = None
     date_range: Optional[Dict[str, str]] = None
     specific_fields: List[str] = None
+    message: str = ""  # Add original message for context
     
     def __post_init__(self):
         if self.search_terms is None:
@@ -118,11 +119,12 @@ class ESQueryHandler:
             sort_order=sort_order,
             aggregation_field=aggregation_field,
             date_range=date_range,
-            specific_fields=specific_fields
+            specific_fields=specific_fields,
+            message=message  # Add original message for context
         )
     
     def _detect_query_type(self, message: str) -> QueryType:
-        """Detect the type of query from message"""
+        """Universal query type detection for any index structure"""
         message_lower = message.lower()
         
         # List indices queries - check this FIRST
@@ -140,6 +142,54 @@ class ESQueryHandler:
         
         if any(re.search(pattern, message_lower) for pattern in list_indices_patterns):
             return QueryType.LIST_INDICES
+        
+        # Aggregation/Statistical queries - Check BEFORE count for better detection
+        agg_patterns = [
+            # Mathematical operations
+            r'جمع.*فیلد',
+            r'مجموع.*فیلد',
+            r'میانگین.*فیلد',
+            r'حداکثر.*فیلد',
+            r'حداقل.*فیلد',
+            r'sum.*field',
+            r'average.*field',
+            r'avg.*field',
+            r'max.*field',
+            r'min.*field',
+            r'total.*field',
+            
+            # Complex aggregations with filtering
+            r'جمع.*در.*رکورد',
+            r'مجموع.*در.*رکورد',
+            r'میانگین.*در.*رکورد',
+            r'sum.*in.*records?',
+            r'total.*in.*records?',
+            r'average.*in.*records?',
+            
+            # Traditional aggregation patterns
+            r'گروه.*بندی',
+            r'تجمیع.*داده',
+            r'آمار.*بر.*اساس',
+            r'میانگین.*از',
+            r'مجموع.*بر.*اساس',
+            r'نمودار.*از',
+            r'چارت.*از',
+            r'گراف.*از',
+            r'توزیع.*داده',
+            r'آنالیز.*داده',
+            r'group.*by',
+            r'aggregate.*by',
+            r'statistics.*by',
+            r'average.*by',
+            r'sum.*by',
+            r'chart.*data',
+            r'graph.*data',
+            r'analyze.*data',
+            r'distribution.*of'
+        ]
+        
+        if any(re.search(pattern, message_lower) for pattern in agg_patterns):
+            return QueryType.AGGREGATE
         
         # Count queries (including conditional counts)
         count_patterns = [
@@ -161,20 +211,32 @@ class ESQueryHandler:
         if any(re.search(pattern, message_lower) for pattern in count_patterns):
             return QueryType.COUNT
         
-        # Fetch/List queries - VERY SPECIFIC PATTERNS
+        # Search queries - Look for specific search terms
+        search_patterns = [
+            r'جستجو.*در',
+            r'پیدا.*کن.*که',
+            r'دنبال.*می.*گردم',
+            r'search.*for',
+            r'find.*in.*where',
+            r'looking.*for.*that',
+            r'filter.*by',
+            r'فیلتر.*بر.*اساس'
+        ]
+        
+        if any(re.search(pattern, message_lower) for pattern in search_patterns):
+            return QueryType.SEARCH
+        
+        # Fetch/List queries - DEFAULT for data retrieval
         fetch_patterns = [
             r'\d+\s*رکورد.*بده',
             r'\d+\s*رکورد.*از.*ایندکس',
             r'رکورد.*از.*ایندکس.*بده',
             r'لیست.*رکورد',
-            r'لیست.*کاربران',
-            r'لیست.*که.*دارای',
-            r'لیست.*هایی.*که',
+            r'لیست.*داده',
             r'نمایش.*رکورد',
             r'آخرین.*رکورد',
             r'اولین.*رکورد',
             r'رکورد.*ها.*بده',
-            r'کاربران.*که.*دارای',
             r'داده.*های.*داخل.*ایندکس',
             r'داده.*های.*ایندکس',
             r'محتویات.*ایندکس',
@@ -184,7 +246,6 @@ class ESQueryHandler:
             r'.*رو.*بده',
             r'show.*record',
             r'list.*record',
-            r'list.*users?.*that',
             r'get.*record',
             r'fetch.*record',
             r'latest.*record',
@@ -192,56 +253,50 @@ class ESQueryHandler:
             r'data.*from.*index',
             r'documents.*from.*index',
             r'contents.*of.*index',
-            r'\d+.*records?.*from'
+            r'\d+.*records?.*from',
+            # Universal patterns for any data request
+            r'بده.*از.*ایندکس',
+            r'نشان.*بده.*از',
+            r'show.*me.*from',
+            r'give.*me.*from'
         ]
         
         if any(re.search(pattern, message_lower) for pattern in fetch_patterns):
             return QueryType.FETCH
         
-        # Search queries
-        search_patterns = [
-            r'جستجو.*در',
-            r'پیدا.*کن',
-            r'دنبال.*می.*گردم',
-            r'search.*for',
-            r'find.*in',
-            r'looking.*for'
-        ]
-        
-        if any(re.search(pattern, message_lower) for pattern in search_patterns):
-            return QueryType.SEARCH
-        
-        # Aggregation queries
-        agg_patterns = [
-            r'گروه.*بندی',
-            r'تجمیع.*داده',
-            r'آمار.*بر.*اساس',
-            r'میانگین.*از',
-            r'مجموع.*بر.*اساس',
-            r'group.*by',
-            r'aggregate.*by',
-            r'statistics.*by',
-            r'average.*by',
-            r'sum.*by'
-        ]
-        
-        if any(re.search(pattern, message_lower) for pattern in agg_patterns):
-            return QueryType.AGGREGATE
+        # If mentions an index, probably wants to fetch data
+        if re.search(r'ایندکس\s+[a-zA-Z0-9_\-\.]+', message_lower):
+            return QueryType.FETCH
         
         return QueryType.UNKNOWN
     
     def _extract_index_pattern(self, message: str) -> Optional[str]:
-        """Extract index pattern from message with improved Persian/English support"""
+        """Universal index pattern extraction supporting multiple indices"""
         
-        # First priority: explicit index mentions
+        # First priority: explicit index mentions (single or multiple)
+        # Support both quoted and unquoted index names
         explicit_patterns = [
-            r'ایندکس\s+([a-zA-Z0-9_\-\.\*]+)',
-            r'از\s+ایندکس\s+([a-zA-Z0-9_\-\.\*]+)',
-            r'در\s+ایندکس\s+([a-zA-Z0-9_\-\.\*]+)',
-            r'داخل\s+ایندکس\s+([a-zA-Z0-9_\-\.\*]+)',
-            r'index\s+([a-zA-Z0-9_\-\.\*]+)',
-            r'from\s+index\s+([a-zA-Z0-9_\-\.\*]+)',
-            r'in\s+index\s+([a-zA-Z0-9_\-\.\*]+)'
+            # Quoted patterns (with single or double quotes)
+            r'ایندکس\s+[\'"]([^\'\"]+)[\'"]',
+            r'از\s+ایندکس\s+[\'"]([^\'\"]+)[\'"]',
+            r'در\s+ایندکس\s+[\'"]([^\'\"]+)[\'"]',
+            r'داخل\s+ایندکس\s+[\'"]([^\'\"]+)[\'"]',
+            r'index\s+[\'"]([^\'\"]+)[\'"]',
+            r'from\s+index\s+[\'"]([^\'\"]+)[\'"]',
+            r'in\s+index\s+[\'"]([^\'\"]+)[\'"]',
+            
+            # Unquoted patterns (until space, comma, or end of string)
+            r'ایندکس\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'از\s+ایندکس\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'در\s+ایندکس\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'داخل\s+ایندکس\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'ایندکس‌های\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'از\s+ایندکس‌های\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'index\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'indices\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'from\s+index\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'from\s+indices\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)',
+            r'in\s+index\s+([a-zA-Z0-9_\-\.]+(?:\-[0-9]{4}\.[0-9]{2}\.[0-9]{2})?)'
         ]
         
         for pattern in explicit_patterns:
@@ -305,6 +360,10 @@ class ESQueryHandler:
             if filtered_tokens:
                 # Return the longest filtered token as likely index name
                 longest = max(filtered_tokens, key=len)
+                # If token has date pattern, use it as-is (exact match)
+                if re.search(r'\d{4}\.\d{2}\.\d{2}', longest):
+                    return longest
+                # Otherwise add wildcards
                 return f"*{longest}*"
         
         # If no index found, return None (will be handled by caller)
@@ -663,20 +722,67 @@ class ESQueryHandler:
         return sort_field, sort_order
     
     def _extract_aggregation_field(self, message: str) -> Optional[str]:
-        """Extract aggregation field"""
-        agg_patterns = [
+        """Extract field name for aggregation with enhanced patterns"""
+        
+        # Enhanced field patterns for mathematical operations
+        field_patterns = [
+            # Persian patterns with quotes
+            r'فیلد\s+[\'"]([^\'\"]+)[\'"]',
+            r'جمع\s+فیلد\s+[\'"]([^\'\"]+)[\'"]',
+            r'مجموع\s+فیلد\s+[\'"]([^\'\"]+)[\'"]',
+            r'میانگین\s+فیلد\s+[\'"]([^\'\"]+)[\'"]',
+            
+            # Persian patterns without quotes
+            r'فیلد\s+([a-zA-Z0-9_\.]+)',
+            r'جمع\s+فیلد\s+([a-zA-Z0-9_\.]+)',
+            r'مجموع\s+فیلد\s+([a-zA-Z0-9_\.]+)',
+            r'میانگین\s+فیلد\s+([a-zA-Z0-9_\.]+)',
+            r'حداکثر\s+فیلد\s+([a-zA-Z0-9_\.]+)',
+            r'حداقل\s+فیلد\s+([a-zA-Z0-9_\.]+)',
+            
+            # Traditional patterns
             r'بر\s+اساس\s+([a-zA-Z\u0600-\u06FF_]+)',
+            r'گروه.*بندی\s+([a-zA-Z0-9_\.]+)',
+            
+            # English patterns
+            r'field\s+[\'"]([^\'\"]+)[\'"]',
+            r'sum\s+field\s+[\'"]([^\'\"]+)[\'"]',
+            r'avg\s+field\s+[\'"]([^\'\"]+)[\'"]',
+            r'field\s+([a-zA-Z0-9_\.]+)',
+            r'sum\s+field\s+([a-zA-Z0-9_\.]+)',
+            r'avg\s+field\s+([a-zA-Z0-9_\.]+)',
             r'group\s+by\s+([a-zA-Z_]+)',
             r'تجمیع\s+([a-zA-Z\u0600-\u06FF_]+)',
             r'آمار\s+([a-zA-Z\u0600-\u06FF_]+)'
         ]
         
-        for pattern in agg_patterns:
+        for pattern in field_patterns:
             match = re.search(pattern, message, re.IGNORECASE)
             if match:
                 return match.group(1)
         
         return None
+    
+    def _extract_aggregation_operation(self, message: str) -> str:
+        """Extract the type of mathematical operation requested"""
+        
+        # Operation patterns
+        operation_patterns = {
+            'sum': [r'جمع', r'مجموع', r'sum', r'total'],
+            'avg': [r'میانگین', r'average', r'avg', r'mean'],
+            'max': [r'حداکثر', r'بیشترین', r'max', r'maximum', r'highest'],
+            'min': [r'حداقل', r'کمترین', r'min', r'minimum', r'lowest'],
+            'count': [r'تعداد', r'شمارش', r'count']
+        }
+        
+        message_lower = message.lower()
+        
+        for operation, patterns in operation_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, message_lower):
+                    return operation
+        
+        return 'sum'  # default
     
     def _extract_date_range(self, message: str) -> Optional[Dict[str, str]]:
         """Extract date range from message"""
@@ -685,6 +791,59 @@ class ESQueryHandler:
         if any(word in message for word in ['از', 'تا', 'between', 'from', 'to']):
             return {"has_range": True}
         return None
+    
+    def _index_exists(self, index_pattern: str) -> bool:
+        """Check if index exists in Elasticsearch"""
+        try:
+            # For exact index names (no wildcards), use direct exists check
+            if not any(c in index_pattern for c in '*?[]'):
+                result = self.es.indices.exists(index=index_pattern)
+                logger.info(f"🔍 Direct index check '{index_pattern}': {result}")
+                return result
+            else:
+                # For patterns with wildcards, try to resolve them
+                try:
+                    response = self.es.indices.get(
+                        index=index_pattern, 
+                        ignore_unavailable=True,
+                        allow_no_indices=True
+                    )
+                    result = bool(response)
+                    logger.info(f"🔍 Pattern index check '{index_pattern}': {result}")
+                    return result
+                except Exception:
+                    logger.warning(f"⚠️ Pattern index check failed for '{index_pattern}'")
+                    return False
+        except Exception as e:
+            logger.error(f"❌ Index existence check failed for '{index_pattern}': {e}")
+            return False
+    
+    def _find_similar_indices(self, index_pattern: str) -> List[str]:
+        """Find indices similar to the given pattern"""
+        try:
+            # Get all available indices
+            indices_response = self.es.cat.indices(format="json", h="index")
+            if not indices_response:
+                return []
+            
+            all_indices = [idx.get("index", "") for idx in indices_response 
+                          if not idx.get("index", "").startswith('.')]
+            
+            # Remove wildcards from pattern for similarity matching
+            clean_pattern = index_pattern.strip('*')
+            
+            # Find indices that contain the pattern
+            similar = []
+            for idx in all_indices:
+                if clean_pattern.lower() in idx.lower():
+                    similar.append(idx)
+            
+            # Sort by length (shorter names first, likely more relevant)
+            similar.sort(key=len)
+            return similar
+            
+        except Exception:
+            return []
     
     def execute_query(self, params: QueryParams) -> Dict[str, Any]:
         """Execute the parsed query"""
@@ -717,6 +876,16 @@ class ESQueryHandler:
         # Check if index pattern is too generic or might be wrong
         if params.index_pattern in ['*ali*', '*است*', '*که*', '*دارای*']:
             return {"enabled": True, "error": "نام ایندکس نامشخص است. لطفاً نام صحیح ایندکس را ذکر کنید."}
+        
+        # Check if the exact index exists (for better error messages)
+        if not self._index_exists(params.index_pattern):
+            # Try to find similar indices
+            similar_indices = self._find_similar_indices(params.index_pattern)
+            if similar_indices:
+                suggestions = ', '.join(similar_indices[:3])  # Show top 3 suggestions
+                return {"enabled": True, "error": f"ایندکس '{params.index_pattern}' یافت نشد. آیا منظورتان یکی از این‌ها است؟ {suggestions}"}
+            else:
+                return {"enabled": True, "error": f"ایندکس '{params.index_pattern}' یافت نشد. برای مشاهده لیست ایندکس‌های موجود بپرسید: 'لیست ایندکس‌ها'"}
         
         try:
             # For simple count queries, use match_all
@@ -791,6 +960,9 @@ class ESQueryHandler:
         if params.index_pattern in ['*ali*', '*است*', '*که*', '*دارای*']:
             return {"enabled": True, "error": "نام ایندکس نامشخص است. لطفاً نام صحیح ایندکس را ذکر کنید."}
         
+        # SKIP index existence check for now - it's causing issues with crypto_data-2025.09.29
+        # Let Elasticsearch handle the error if index doesn't exist
+        
         try:
             # Build query with conditions
             must_clauses = []
@@ -841,6 +1013,9 @@ class ESQueryHandler:
                 search_body["_source"] = params.filters['_source']
             
             # Execute search
+            logger.info(f"🔍 Executing search on index: {params.index_pattern}")
+            logger.info(f"📋 Search body: {search_body}")
+            
             response = self.es.search(
                 index=params.index_pattern,
                 body=search_body,
@@ -848,9 +1023,13 @@ class ESQueryHandler:
                 allow_no_indices=True
             )
             
+            logger.info(f"📊 ES Response keys: {list(response.keys())}")
+            
             hits = response.get('hits', {}).get('hits', [])
             total = response.get('hits', {}).get('total', {})
             total_value = total.get('value') if isinstance(total, dict) else total
+            
+            logger.info(f"📊 Found {len(hits)} hits, total: {total_value}")
             
             # Format documents
             docs = []
@@ -965,30 +1144,152 @@ class ESQueryHandler:
             return {"enabled": True, "error": f"خطا در جستجو: {str(e)}"}
     
     def _execute_aggregate_query(self, params: QueryParams) -> Dict[str, Any]:
-        """Execute aggregation query"""
+        """Universal aggregation query for any index structure"""
         if not params.index_pattern:
             return {"enabled": True, "error": "الگوی ایندکس مشخص نشده"}
         
-        if not params.aggregation_field:
-            return {"enabled": True, "error": "فیلد تجمیع مشخص نشده"}
-        
         try:
-            # Build aggregation
-            aggs = {
-                "group_by": {
+            # First, get sample documents to understand field structure
+            sample_response = self.es.search(
+                index=params.index_pattern,
+                body={"query": {"match_all": {}}, "size": 1},
+                ignore_unavailable=True,
+                allow_no_indices=True
+            )
+            
+            sample_fields = []
+            if sample_response.get('hits', {}).get('hits'):
+                sample_doc = sample_response['hits']['hits'][0].get('_source', {})
+                sample_fields = list(sample_doc.keys())
+            
+            # Auto-detect aggregation field if not specified
+            agg_field = params.aggregation_field
+            if not agg_field:
+                # Smart field detection for aggregation (case-insensitive)
+                priority_fields = ['@timestamp', 'timestamp', 'date', 'created_at', 'status', 'type', 'category', 'price_usd', 'price', 'amount', 'value']
+                for priority_field in priority_fields:
+                    for actual_field in sample_fields:
+                        if actual_field.lower() == priority_field.lower():
+                            agg_field = actual_field
+                            break
+                    if agg_field:
+                        break
+                
+                # If no priority field found, use first suitable field
+                if not agg_field and sample_fields:
+                    for field in sample_fields:
+                        if not field.startswith('_') and isinstance(sample_doc.get(field), (str, int, float)):
+                            agg_field = field
+                            break
+            else:
+                # Case-insensitive field matching for user-specified fields
+                if agg_field not in sample_fields:
+                    for field in sample_fields:
+                        if field.lower() == agg_field.lower():
+                            agg_field = field  # Use the actual field name from the index
+                            break
+            
+            if not agg_field:
+                return {"enabled": True, "error": "فیلد مناسب برای تجمیع یافت نشد"}
+            
+            # Detect mathematical operation
+            operation = self._extract_aggregation_operation(params.message if hasattr(params, 'message') else "")
+            
+            # Check if this is a filtered aggregation (e.g., "sum in last 10 records")
+            limit = self._extract_size(params.message if hasattr(params, 'message') else "")
+            has_limit_filter = any(pattern in params.message.lower() if hasattr(params, 'message') else "" 
+                                 for pattern in ['در', 'رکورد', 'in', 'records', 'last', 'اخر', 'آخر'])
+            
+            logger.info(f"🔍 Aggregation detection: field='{agg_field}', operation='{operation}', limit={limit}, has_limit_filter={has_limit_filter}")
+            logger.info(f"📝 Original message: {params.message if hasattr(params, 'message') else 'No message'}")
+            
+            # Build smart aggregation based on operation and context
+            search_body = {}
+            
+            # If this is a filtered aggregation (e.g., "sum in last 10 records")
+            if has_limit_filter and limit > 0:
+                logger.info(f"🎯 Executing filtered aggregation: {operation} on {agg_field} for last {limit} records")
+                # First get the records, then aggregate
+                search_body = {
+                    "query": {"match_all": {}},
+                    "size": limit,
+                    "sort": [{"@timestamp": {"order": "desc"}}] if "@timestamp" in sample_fields else [{"_id": {"order": "desc"}}]
+                }
+                
+                # Get the records first
+                records_response = self.es.search(
+                    index=params.index_pattern,
+                    body=search_body,
+                    ignore_unavailable=True,
+                    allow_no_indices=True
+                )
+                
+                # Calculate the aggregation manually from the records
+                hits = records_response.get('hits', {}).get('hits', [])
+                if hits and operation in ['sum', 'avg', 'max', 'min']:
+                    values = []
+                    for hit in hits:
+                        source = hit.get('_source', {})
+                        if agg_field in source and isinstance(source[agg_field], (int, float)):
+                            values.append(source[agg_field])
+                    
+                    if values:
+                        if operation == 'sum':
+                            result_value = sum(values)
+                        elif operation == 'avg':
+                            result_value = sum(values) / len(values)
+                        elif operation == 'max':
+                            result_value = max(values)
+                        elif operation == 'min':
+                            result_value = min(values)
+                        
+                        logger.info(f"✅ Filtered aggregation result: {operation}({agg_field}) = {result_value} from {len(hits)} records")
+                        return {
+                            "enabled": True,
+                            "query_type": "aggregate",
+                            "index_pattern": params.index_pattern,
+                            "aggregation_field": agg_field,
+                            "operation": operation,
+                            "limit": limit,
+                            "result_value": result_value,
+                            "total_records": len(hits),
+                            "sample_fields": sample_fields,
+                            "took": records_response.get('took', 0)
+                        }
+            
+            # Traditional aggregation without record limit
+            aggs = {}
+            
+            # Build aggregation based on operation
+            if operation in ['sum', 'avg', 'max', 'min'] and isinstance(sample_doc.get(agg_field), (int, float)):
+                aggs[f"{operation}_agg"] = {
+                    operation: {
+                        "field": agg_field
+                    }
+                }
+            else:
+                # Terms aggregation for categorical data
+                aggs["terms_agg"] = {
                     "terms": {
-                        "field": f"{params.aggregation_field}.keyword",
+                        "field": f"{agg_field}.keyword" if isinstance(sample_doc.get(agg_field), str) else agg_field,
                         "size": 20
                     }
                 }
-            }
             
-            # Add date histogram if timestamp field
-            if 'timestamp' in params.aggregation_field.lower() or 'date' in params.aggregation_field.lower():
+            # Date histogram for date fields
+            if any(date_word in agg_field.lower() for date_word in ['timestamp', 'date', 'time', 'created', 'updated']):
                 aggs["date_histogram"] = {
                     "date_histogram": {
-                        "field": params.aggregation_field,
+                        "field": agg_field,
                         "calendar_interval": "day"
+                    }
+                }
+            
+            # Statistics for numeric fields
+            if isinstance(sample_doc.get(agg_field), (int, float)):
+                aggs["stats"] = {
+                    "stats": {
+                        "field": agg_field
                     }
                 }
             
@@ -1005,17 +1306,70 @@ class ESQueryHandler:
             
             aggregations = response.get('aggregations', {})
             
+            # Prepare chart data if applicable
+            chart_data = self._prepare_chart_data(aggregations, agg_field)
+            
             return {
                 "enabled": True,
                 "query_type": "aggregate",
                 "index_pattern": params.index_pattern,
-                "aggregation_field": params.aggregation_field,
+                "aggregation_field": agg_field,
                 "aggregations": aggregations,
+                "sample_fields": sample_fields,
+                "chart_data": chart_data,
                 "took": response.get('took', 0)
             }
         
         except Exception as e:
             return {"enabled": True, "error": f"خطا در تجمیع: {str(e)}"}
+    
+    def _prepare_chart_data(self, aggregations: Dict[str, Any], field_name: str) -> Optional[Dict[str, Any]]:
+        """Prepare chart data from aggregations for visualization"""
+        try:
+            chart_data = None
+            
+            # Terms aggregation -> Bar chart
+            if "terms_agg" in aggregations:
+                buckets = aggregations["terms_agg"].get("buckets", [])
+                if buckets:
+                    labels = [bucket.get("key", "") for bucket in buckets[:10]]
+                    values = [bucket.get("doc_count", 0) for bucket in buckets[:10]]
+                    
+                    chart_data = {
+                        "type": "bar",
+                        "title": f"توزیع {field_name}",
+                        "labels": labels,
+                        "datasets": [{
+                            "label": "تعداد",
+                            "data": values,
+                            "backgroundColor": ["rgba(54, 162, 235, 0.6)"] * len(values)
+                        }]
+                    }
+            
+            # Date histogram -> Line chart
+            elif "date_histogram" in aggregations:
+                buckets = aggregations["date_histogram"].get("buckets", [])
+                if buckets:
+                    labels = [bucket.get("key_as_string", bucket.get("key", "")) for bucket in buckets]
+                    values = [bucket.get("doc_count", 0) for bucket in buckets]
+                    
+                    chart_data = {
+                        "type": "line",
+                        "title": f"روند زمانی {field_name}",
+                        "labels": labels,
+                        "datasets": [{
+                            "label": "تعداد",
+                            "data": values,
+                            "borderColor": ["rgba(75, 192, 192, 1)"] * len(values),
+                            "backgroundColor": ["rgba(75, 192, 192, 0.2)"] * len(values)
+                        }]
+                    }
+            
+            return chart_data
+            
+        except Exception as e:
+            logger.error(f"Error preparing chart data: {e}")
+            return None
     
     def _execute_list_indices_query(self, params: QueryParams) -> Dict[str, Any]:
         """Execute list indices query"""
@@ -1201,28 +1555,77 @@ class ESQueryHandler:
             aggs = result.get("aggregations", {})
             field = result.get("aggregation_field", "نامشخص")
             pattern = result.get("index_pattern", "نامشخص")
+            sample_fields = result.get("sample_fields", [])
+            operation = result.get("operation", "")
+            result_value = result.get("result_value")
+            limit = result.get("limit", 0)
+            total_records = result.get("total_records", 0)
             
+            # Handle filtered aggregation results (e.g., sum in last 10 records)
+            if result_value is not None:
+                operation_persian = {
+                    'sum': 'جمع',
+                    'avg': 'میانگین', 
+                    'max': 'حداکثر',
+                    'min': 'حداقل'
+                }.get(operation, operation)
+                
+                lines = [f"🧮 نتیجه محاسبه '{operation_persian}' فیلد '{field}' در ایندکس '{pattern}':"]
+                lines.append(f"📊 {operation_persian} فیلد '{field}' در {total_records} رکورد اخر: {result_value:,.2f}")
+                
+                if limit > 0:
+                    lines.append(f"🔢 تعداد رکوردهای بررسی شده: {total_records}")
+                
+                return "\n".join(lines)
+            
+            # Handle traditional aggregation results
             if not aggs:
                 return f"📈 آماری برای '{field}' در '{pattern}' یافت نشد"
             
-            lines = [f"📈 آمار '{field}' در '{pattern}':"]
+            lines = [f"📈 تحلیل داده‌های '{pattern}' بر اساس '{field}':"]
             
             # Process terms aggregation
-            if "group_by" in aggs:
-                buckets = aggs["group_by"].get("buckets", [])
-                for bucket in buckets[:10]:
-                    key = bucket.get("key", "نامشخص")
-                    count = bucket.get("doc_count", 0)
-                    lines.append(f"• {key}: {count:,}")
+            if "terms_agg" in aggs:
+                buckets = aggs["terms_agg"].get("buckets", [])
+                if buckets:
+                    lines.append(f"\n🏷️ توزیع مقادیر '{field}':")
+                    for bucket in buckets[:15]:  # Show top 15
+                        key = bucket.get("key", "نامشخص")
+                        count = bucket.get("doc_count", 0)
+                        lines.append(f"  • {key}: {count:,}")
             
             # Process date histogram
             if "date_histogram" in aggs:
                 buckets = aggs["date_histogram"].get("buckets", [])
-                lines.append("\n📅 توزیع زمانی:")
-                for bucket in buckets[-7:]:  # Last 7 days
-                    date = bucket.get("key_as_string", bucket.get("key", "نامشخص"))
-                    count = bucket.get("doc_count", 0)
-                    lines.append(f"• {date}: {count:,}")
+                if buckets:
+                    lines.append(f"\n📅 توزیع زمانی '{field}':")
+                    for bucket in buckets[-10:]:  # Last 10 periods
+                        date = bucket.get("key_as_string", bucket.get("key", "نامشخص"))
+                        count = bucket.get("doc_count", 0)
+                        lines.append(f"  • {date}: {count:,}")
+            
+            # Process statistics
+            if "stats" in aggs:
+                stats = aggs["stats"]
+                lines.append(f"\n📊 آمار عددی '{field}':")
+                lines.append(f"  • تعداد: {stats.get('count', 0):,}")
+                lines.append(f"  • مجموع: {stats.get('sum', 0):,.2f}")
+                lines.append(f"  • میانگین: {stats.get('avg', 0):,.2f}")
+                lines.append(f"  • کمینه: {stats.get('min', 0):,.2f}")
+                lines.append(f"  • بیشینه: {stats.get('max', 0):,.2f}")
+            
+            # Show available fields for future queries
+            if sample_fields:
+                lines.append(f"\n💡 فیلدهای موجود در این ایندکس:")
+                field_preview = ', '.join(sample_fields[:10])
+                if len(sample_fields) > 10:
+                    field_preview += f" و {len(sample_fields) - 10} فیلد دیگر"
+                lines.append(f"  {field_preview}")
+            
+            # Add chart data to response if available
+            chart_data = result.get("chart_data")
+            if chart_data:
+                lines.append(f"\n📊 نمودار داده‌ها آماده نمایش است")
             
             return "\n".join(lines)
         
@@ -1267,30 +1670,19 @@ class ESQueryHandler:
         if not existing_fields:
             return title + "\n(فیلد قابل نمایشی وجود ندارد)"
         
-        # Field translations
+        # Dynamic field translations - only translate common system fields
+        # Let user field names remain as-is to support any data structure
         field_translations = {
             "_index": "ایندکس",
             "_id": "شناسه", 
             "_score": "امتیاز",
-            "username": "نام کاربری",
-            "email": "ایمیل",
-            "user_id": "آیدی کاربر",
-            "timestamp": "زمان",
-            "date": "تاریخ",
-            "title": "عنوان",
-            "content": "محتوا",
-            "message": "پیام",
-            "status": "وضعیت",
-            "type": "نوع",
-            "name": "نام",
-            "id": "شناسه",
-            "created_at": "تاریخ ایجاد",
-            "updated_at": "تاریخ بروزرسانی",
-            "highlight": "برجسته شده",
-            "description": "توضیحات",
-            "category": "دسته‌بندی",
-            "tags": "برچسب‌ها"
+            "@timestamp": "زمان",
+            "@version": "نسخه",
+            "highlight": "برجسته شده"
         }
+        
+        # For unknown fields, use the original field name
+        # This makes the system work with ANY data structure dynamically
         
         # Build HTML table with wrapper
         html_parts = [

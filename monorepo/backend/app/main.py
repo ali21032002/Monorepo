@@ -225,6 +225,26 @@ def es_health() -> Dict[str, Any]:
 	except Exception as e:
 		return {"enabled": False, "error": str(e)}
 
+
+@app.get("/api/es/indices-fields")
+def get_indices_with_fields() -> Dict[str, Any]:
+	"""Get all Elasticsearch indices with their field mappings in tree structure."""
+	try:
+		info = esmod.get_all_indices_with_fields()
+		return info
+	except Exception as e:
+		return {"enabled": False, "error": str(e)}
+
+
+@app.get("/api/es/index-fields/{index_name}")
+def get_index_fields(index_name: str) -> Dict[str, Any]:
+	"""Get field mappings for a specific Elasticsearch index."""
+	try:
+		info = esmod.get_index_fields(index_name)
+		return info
+	except Exception as e:
+		return {"enabled": False, "error": str(e)}
+
 @app.get("/api/chat-speech-status")
 def get_chat_speech_status() -> Dict[str, Any]:
 	"""Get speech-to-text status specifically for chatbot"""
@@ -878,13 +898,54 @@ def chat(req: ChatRequest) -> ChatResponse:
 			return ChatResponse(message="ElasticSearch غیرفعال است (ES_ENABLED=false). برای فعال‌سازی، تنظیمات .env را بروزرسانی کنید.")
 		if info.get("error"):
 			return ChatResponse(message=f"خطا در بازیابی ایندکس‌ها: {info['error']}")
+		
+		# Show all available indices (dynamic discovery)
+		all_indices = info.get("all_indices", [])
+		total_indices = info.get("total_indices", 0)
 		configured = info.get("configured", [])
-		existing = info.get("existing", [])
+		
+		if not all_indices:
+			return ChatResponse(message="📚 هیچ ایندکسی در کلاستر ElasticSearch یافت نشد.")
+		
 		text_lines = [
-			"📚 فهرست ایندکس‌های ElasticSearch:",
-			f"- پیکربندی شده: {', '.join(configured) if configured else '—'}",
-			f"- موجود در کلاستر: {', '.join(existing) if existing else '—'}",
+			f"📚 فهرست کامل ایندکس‌های ElasticSearch ({total_indices} ایندکس):",
+			""
 		]
+		
+		# Group indices: configured vs discovered
+		configured_indices = [idx for idx in all_indices if idx.get("configured")]
+		discovered_indices = [idx for idx in all_indices if not idx.get("configured")]
+		
+		if configured_indices:
+			text_lines.append("🔧 ایندکس‌های پیکربندی شده:")
+			for idx in configured_indices:
+				name = idx.get("name", "")
+				doc_count = idx.get("doc_count", "0")
+				size = idx.get("size", "0b")
+				try:
+					doc_num = int(doc_count) if doc_count != "-" else 0
+					doc_formatted = f"{doc_num:,}" if doc_num > 0 else "خالی"
+				except:
+					doc_formatted = doc_count
+				text_lines.append(f"  • {name}: {doc_formatted} سند ({size})")
+			text_lines.append("")
+		
+		if discovered_indices:
+			text_lines.append("🔍 ایندکس‌های کشف شده (غیر پیکربندی):")
+			for idx in discovered_indices:
+				name = idx.get("name", "")
+				doc_count = idx.get("doc_count", "0")
+				size = idx.get("size", "0b")
+				try:
+					doc_num = int(doc_count) if doc_count != "-" else 0
+					doc_formatted = f"{doc_num:,}" if doc_num > 0 else "خالی"
+				except:
+					doc_formatted = doc_count
+				text_lines.append(f"  • {name}: {doc_formatted} سند ({size})")
+		
+		text_lines.append("")
+		text_lines.append("💡 می‌توانید از هر کدام از این ایندکس‌ها برای جستجو استفاده کنید.")
+		
 		return ChatResponse(message="\n".join(text_lines))
 
 	# Check if this is an ES query using the new advanced handler
@@ -895,8 +956,14 @@ def chat(req: ChatRequest) -> ChatResponse:
 		if query_params.query_type.value != "unknown":
 			result = es_query_handler.execute_query(query_params)
 			formatted_response = es_query_handler.format_response(result, query_params)
-			# Return immediately - don't let it go to chart detection
-			return ChatResponse(message=formatted_response)
+			
+			# Include chart data if available
+			chart_data = result.get("chart_data") if isinstance(result, dict) else None
+			
+			return ChatResponse(
+				message=formatted_response,
+				chart=chart_data
+			)
 
 		# Legacy ES handling - keeping as fallback
 		# Detect ES count intent (e.g., تعداد رکوردهای ایندکس instagram ...)

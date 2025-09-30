@@ -194,18 +194,46 @@ def list_indices() -> Dict[str, Any]:
     if es is None:
         return {"enabled": False}
     try:
-        indices = _parse_indices()["list"]
-        existing_list = []
-        missing_list = []
-        for idx in indices:
+        # Get configured indices
+        configured_indices = _parse_indices()["list"]
+        configured_existing = []
+        configured_missing = []
+        
+        for idx in configured_indices:
             try:
                 if es.indices.exists(index=idx):
-                    existing_list.append(idx)
+                    configured_existing.append(idx)
                 else:
-                    missing_list.append(idx)
+                    configured_missing.append(idx)
             except Exception:
-                missing_list.append(idx)
-        return {"enabled": True, "configured": indices, "existing": existing_list, "missing": missing_list}
+                configured_missing.append(idx)
+        
+        # Get all indices from cluster (dynamic discovery)
+        all_indices = []
+        try:
+            indices_response = es.cat.indices(format="json", h="index,docs.count,store.size")
+            if indices_response:
+                for idx in indices_response:
+                    index_name = idx.get("index", "")
+                    # Skip system indices (starting with .)
+                    if not index_name.startswith('.'):
+                        all_indices.append({
+                            "name": index_name,
+                            "doc_count": idx.get("docs.count", "0"),
+                            "size": idx.get("store.size", "0b"),
+                            "configured": index_name in configured_indices
+                        })
+        except Exception as e:
+            print(f"⚠️ Could not fetch all indices: {e}")
+        
+        return {
+            "enabled": True, 
+            "configured": configured_indices, 
+            "existing": configured_existing, 
+            "missing": configured_missing,
+            "all_indices": all_indices,  # New: all available indices
+            "total_indices": len(all_indices)
+        }
     except Exception as e:
         return {"enabled": True, "error": str(e)}
 
@@ -300,6 +328,145 @@ def fetch_documents_by_pattern(name: str, size: int = 10) -> Dict[str, Any]:
         return {"enabled": True, "pattern": pat, "docs": docs, "count": len(docs), "total": total_val, "took": resp.get("took")}
     except Exception as e:
         return {"enabled": True, "pattern": pat, "error": str(e), "docs": []}
+
+def get_index_fields(index_name: str) -> Dict[str, Any]:
+    """Get field mappings for a specific index."""
+    es = get_client()
+    if es is None:
+        return {"enabled": False}
+    
+    try:
+        mapping = es.indices.get_mapping(index=index_name)
+        if not mapping or index_name not in mapping:
+            return {"enabled": True, "error": f"Index '{index_name}' not found"}
+        
+        index_mapping = mapping[index_name]
+        mappings = index_mapping.get("mappings", {})
+        properties = mappings.get("properties", {})
+        
+        # Convert mapping to a more readable format
+        fields = []
+        for field_name, field_config in properties.items():
+            field_type = field_config.get("type", "unknown")
+            field_info = {
+                "name": field_name,
+                "type": field_type
+            }
+            
+            # Add additional properties if they exist
+            if "properties" in field_config:
+                field_info["nested_fields"] = list(field_config["properties"].keys())
+            if "fields" in field_config:
+                field_info["sub_fields"] = list(field_config["fields"].keys())
+            
+            fields.append(field_info)
+        
+        return {
+            "enabled": True,
+            "index": index_name,
+            "fields": fields,
+            "total_fields": len(fields)
+        }
+    
+    except Exception as e:
+        return {"enabled": True, "error": str(e)}
+
+
+def get_all_indices_with_fields() -> Dict[str, Any]:
+    """Get all indices with their field mappings in a tree structure."""
+    es = get_client()
+    if es is None:
+        return {"enabled": False}
+    
+    try:
+        # Get all indices
+        indices_info = list_indices()
+        if not indices_info.get("enabled"):
+            return indices_info
+        
+        all_indices = indices_info.get("all_indices", [])
+        if not all_indices:
+            return {"enabled": True, "indices": [], "total": 0}
+        
+        # Get field mappings for each index
+        indices_with_fields = []
+        for idx_info in all_indices:
+            index_name = idx_info.get("name", "")
+            if not index_name:
+                continue
+            
+            try:
+                # Get field mapping for this index
+                mapping = es.indices.get_mapping(index=index_name)
+                if mapping and index_name in mapping:
+                    index_mapping = mapping[index_name]
+                    mappings = index_mapping.get("mappings", {})
+                    properties = mappings.get("properties", {})
+                    
+                    fields = []
+                    for field_name, field_config in properties.items():
+                        field_type = field_config.get("type", "unknown")
+                        field_info = {
+                            "name": field_name,
+                            "type": field_type
+                        }
+                        
+                        # Add nested fields if they exist
+                        if "properties" in field_config:
+                            nested_fields = []
+                            for nested_name, nested_config in field_config["properties"].items():
+                                nested_fields.append({
+                                    "name": nested_name,
+                                    "type": nested_config.get("type", "unknown")
+                                })
+                            field_info["nested_fields"] = nested_fields
+                        
+                        # Add sub-fields if they exist
+                        if "fields" in field_config:
+                            sub_fields = []
+                            for sub_name, sub_config in field_config["fields"].items():
+                                sub_fields.append({
+                                    "name": sub_name,
+                                    "type": sub_config.get("type", "unknown")
+                                })
+                            field_info["sub_fields"] = sub_fields
+                        
+                        fields.append(field_info)
+                    
+                    # Add fields to index info
+                    index_with_fields = {
+                        **idx_info,
+                        "fields": fields,
+                        "field_count": len(fields)
+                    }
+                    indices_with_fields.append(index_with_fields)
+                else:
+                    # Index exists but no mapping found
+                    indices_with_fields.append({
+                        **idx_info,
+                        "fields": [],
+                        "field_count": 0,
+                        "error": "No mapping found"
+                    })
+            
+            except Exception as e:
+                # Error getting mapping for this specific index
+                indices_with_fields.append({
+                    **idx_info,
+                    "fields": [],
+                    "field_count": 0,
+                    "error": str(e)
+                })
+        
+        return {
+            "enabled": True,
+            "indices": indices_with_fields,
+            "total": len(indices_with_fields)
+        }
+    
+    except Exception as e:
+        return {"enabled": True, "error": str(e)}
+
 
 def health() -> Dict[str, Any]:
     """Return detailed ES connection health for diagnostics."""
