@@ -948,6 +948,286 @@ def chat(req: ChatRequest) -> ChatResponse:
 		
 		return ChatResponse(message="\n".join(text_lines))
 
+	# SIMPLE DIRECT CHECK - if message contains mathematical operations OR simple listing and "price_usd", handle it directly
+	needs_statistics = any(word in req.message.lower() for word in ['جمع', 'میانگین', 'مجموع', 'average', 'sum'])
+	needs_simple_list = any(word in req.message.lower() for word in ['بده', 'give', 'show', 'لیست', 'list']) and not needs_statistics
+	has_price_usd = 'price_usd' in req.message.lower()
+	
+	if (needs_statistics and has_price_usd) or (needs_simple_list and has_price_usd):
+		try:
+			# Direct implementation for list and sum
+			es = esmod.get_client()
+			if es:
+				# Check if it's "last N records" query
+				import re
+				print(f"🎯 Testing message: '{req.message.lower()}'")
+				# Try multiple patterns for different query types
+				last_records_match = re.search(r'(\d+)\s*رکورد\s*اخر', req.message.lower())
+				if not last_records_match:
+					last_records_match = re.search(r'(\d+)\s*رکورد\s*آخر', req.message.lower())
+				if not last_records_match:
+					last_records_match = re.search(r'(\d+)\s*رکورد\s*آخرین', req.message.lower())
+				if not last_records_match:
+					# Pattern for "فقط N رکورد"
+					last_records_match = re.search(r'فقط\s*(\d+)\s*رکورد', req.message.lower())
+				if not last_records_match:
+					# Pattern for "N رکورد را بده"
+					last_records_match = re.search(r'(\d+)\s*رکورد\s*را\s*بده', req.message.lower())
+				print(f"🎯 Pattern match result: {last_records_match}")
+				size = 10000  # default
+				sort_field = None
+				sort_order = "desc"
+				
+				if last_records_match:
+					size = int(last_records_match.group(1))
+					# Check if it's a "last" query or just "N records" query
+					if any(word in req.message.lower() for word in ['اخر', 'آخر', 'آخرین', 'last']):
+						sort_field = "@timestamp"
+						print(f"🎯 Detected last {size} records query")
+					else:
+						sort_field = None
+						print(f"🎯 Detected {size} records query (no specific order)")
+					print(f"🎯 Size will be set to: {size}")
+				
+				# Check if Date field is explicitly requested
+				needs_date = any(word in req.message.lower() for word in ['date', 'تاریخ', 'تاریخ'])
+				
+				# Simple query with proper sorting for last N records
+				# Build _source fields based on what's needed
+				source_fields = ["Price_USD", "_id"]
+				if needs_date:
+					source_fields.append("Date")
+				
+				search_body = {
+					"query": {"exists": {"field": "Price_USD"}},
+					"size": size,
+					"_source": source_fields
+				}
+				
+				# Add sorting if it's a "last records" query
+				if last_records_match and sort_field:
+					search_body["sort"] = [{"@timestamp": {"order": "desc"}}]
+					print(f"🎯 Added sort: {search_body['sort']}")
+				elif last_records_match:
+					print(f"🎯 No sorting added (just {size} records)")
+				
+				print(f"🎯 Final search_body: {search_body}")
+				
+				response = es.search(
+					index="gold_data-2025.09.29",
+					body=search_body,
+					ignore_unavailable=True,
+					allow_no_indices=True
+				)
+				
+				# Process hits response
+				hits = response.get('hits', {}).get('hits', [])
+				print(f"🎯 Got {len(hits)} hits from ES")
+				id_value_pairs = []
+				cleaned_values = []
+				
+				for hit in hits:
+					source = hit.get('_source', {})
+					doc_id = hit.get('_id', '')
+					if 'Price_USD' in source:
+						raw_value = source['Price_USD']
+						pair_data = {'id': doc_id, 'value': raw_value}
+						
+						# Only add date if it was requested
+						if needs_date:
+							date_value = source.get('Date', 'نامشخص')
+							pair_data['date'] = date_value
+						
+						id_value_pairs.append(pair_data)
+						
+						# Clean numeric value
+						try:
+							cleaned = float(str(raw_value).replace('$', '').replace(',', '').replace('-', ''))
+							cleaned_values.append(cleaned)
+						except:
+							pass
+				
+				# Detect all statistical operations needed (only if statistics are requested)
+				needs_sum = any(word in req.message.lower() for word in ['جمع', 'مجموع', 'sum'])
+				needs_average = any(word in req.message.lower() for word in ['میانگین', 'average', 'avg'])
+				needs_min = any(word in req.message.lower() for word in ['حداقل', 'کمترین', 'min', 'minimum'])
+				needs_max = any(word in req.message.lower() for word in ['حداکثر', 'بیشترین', 'max', 'maximum'])
+				needs_count = any(word in req.message.lower() for word in ['فراوانی', 'تعداد', 'count', 'frequency'])
+				needs_std = any(word in req.message.lower() for word in ['انحراف', 'گریز', 'standard', 'std'])
+				needs_median = any(word in req.message.lower() for word in ['میانه', 'median', 'مدین'])
+				needs_mode = any(word in req.message.lower() for word in ['نما', 'mode', 'مد'])
+				needs_variance = any(word in req.message.lower() for word in ['واریانس', 'variance', 'پراکندگی'])
+				needs_range = any(word in req.message.lower() for word in ['دامنه', 'range', 'فاصله'])
+				needs_growth = any(word in req.message.lower() for word in ['رشد', 'growth', 'نرخ رشد', 'افزایش'])
+				needs_decline = any(word in req.message.lower() for word in ['کاهش', 'decline', 'نرخ کاهش', 'کم شدن'])
+				needs_trend = any(word in req.message.lower() for word in ['روند', 'trend', 'گرایش'])
+				
+				# Check if any statistics are needed
+				any_statistics_needed = any([needs_sum, needs_average, needs_min, needs_max, needs_count, needs_std, needs_median, needs_mode, needs_variance, needs_range, needs_growth, needs_decline, needs_trend])
+				
+				# Calculate all statistical measures
+				if cleaned_values:
+					sum_result = sum(cleaned_values)
+					average_result = sum_result / len(cleaned_values)
+					min_result = min(cleaned_values)
+					max_result = max(cleaned_values)
+					count_result = len(cleaned_values)
+					
+					# Standard deviation and variance
+					variance = sum((x - average_result) ** 2 for x in cleaned_values) / len(cleaned_values)
+					std_result = variance ** 0.5
+					
+					# Median calculation
+					sorted_values = sorted(cleaned_values)
+					n = len(sorted_values)
+					if n % 2 == 0:
+						median_result = (sorted_values[n//2 - 1] + sorted_values[n//2]) / 2
+					else:
+						median_result = sorted_values[n//2]
+					
+					# Mode calculation (most frequent value)
+					from collections import Counter
+					value_counts = Counter(cleaned_values)
+					mode_result = value_counts.most_common(1)[0][0] if value_counts else 0
+					
+					# Range calculation
+					range_result = max_result - min_result
+					
+					# Growth/Decline rate calculation (if we have time-ordered data)
+					growth_rate = 0
+					decline_rate = 0
+					trend_result = "ثابت"
+					
+					if len(cleaned_values) >= 2:
+						# Simple linear trend calculation
+						first_half = cleaned_values[:len(cleaned_values)//2]
+						second_half = cleaned_values[len(cleaned_values)//2:]
+						
+						first_avg = sum(first_half) / len(first_half)
+						second_avg = sum(second_half) / len(second_half)
+						
+						if first_avg != 0:
+							growth_rate = ((second_avg - first_avg) / first_avg) * 100
+							decline_rate = -growth_rate if growth_rate < 0 else 0
+							growth_rate = growth_rate if growth_rate > 0 else 0
+							
+							if growth_rate > 5:
+								trend_result = "صعودی"
+							elif decline_rate > 5:
+								trend_result = "نزولی"
+							else:
+								trend_result = "ثابت"
+				else:
+					sum_result = average_result = min_result = max_result = count_result = std_result = 0
+					median_result = mode_result = variance = range_result = 0
+					growth_rate = decline_rate = 0
+					trend_result = "نامشخص"
+				
+				print(f"🎯 Operations: sum={needs_sum}, avg={needs_average}, min={needs_min}, max={needs_max}, count={needs_count}, std={needs_std}")
+				
+				# Format response with HTML table - improved colors
+				if last_records_match:
+					title = f"📋 لیست {size} رکورد آخر فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
+				else:
+					title = f"📋 لیست {size} رکورد فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
+				# Build table header based on what fields are needed
+				if needs_date:
+					table_title = "📊 جدول ID، تاریخ و مقادیر:"
+					table_headers = """<th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">ردیف</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">ID</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">تاریخ</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">مقدار خام</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">مقدار پاک‌سازی شده</th>"""
+					colspan_count = 5
+				else:
+					table_title = "📊 جدول ID و مقادیر:"
+					table_headers = """<th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">ردیف</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">ID</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">مقدار خام</th><th style="border: 1px solid var(--border-color, #d1d5db); padding: 8px 6px; text-align: center; font-size: 0.9em; font-weight: 600; color: var(--text-color, #111827);">مقدار پاک‌سازی شده</th>"""
+					colspan_count = 4
+				
+				html_content = f"""<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0;"><h3 style="margin: 0 0 8px 0; padding: 0; font-size: 1.1em; color: var(--text-color, #1a1a1a);">{title}</h3><h4 style="margin: 0 0 6px 0; padding: 0; font-size: 1em; color: var(--text-color, #2c2c2c);">{table_title}</h4><div style="overflow-x: auto; margin: 0;"><table style="border-collapse: collapse; width: 100%; margin: 0; border: 1px solid var(--border-color, #d1d5db); background: var(--bg-color, white);"><thead><tr style="background: var(--header-bg, #f3f4f6);">{table_headers}</tr></thead><tbody>"""
+				
+				# Show only the requested number of records
+				display_count = size if last_records_match else min(len(id_value_pairs), 20)
+				for i, pair in enumerate(id_value_pairs[:display_count], 1):
+					doc_id = pair['id']  # نمایش کامل ID
+					raw_value = str(pair['value'])[:20]
+					
+					try:
+						cleaned = float(str(pair['value']).replace('$', '').replace(',', '').replace('-', ''))
+						cleaned_str = f"{cleaned:,.2f}"
+						row_bg = "var(--row-even-bg, #f8f9fa)" if i % 2 == 0 else "var(--row-odd-bg, transparent)"
+					except:
+						cleaned_str = "نامعتبر"
+						row_bg = "var(--error-bg, #ffebee)"
+					
+					# Build row content based on whether date is needed
+					if needs_date:
+						date_value = pair.get('date', 'نامشخص')
+						html_content += f"""<tr style="background: {row_bg};"><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-size: 0.85em; color: var(--text-color, #374151);">{i}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 0.8em; color: var(--text-color, #4b5563);">{doc_id}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-size: 0.85em; color: var(--text-color, #374151);">{date_value}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-size: 0.85em; color: var(--text-color, #374151);">{raw_value}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-weight: 600; font-size: 0.85em; color: var(--success-color, #059669);">{cleaned_str}</td></tr>"""
+					else:
+						html_content += f"""<tr style="background: {row_bg};"><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-size: 0.85em; color: var(--text-color, #374151);">{i}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace; font-size: 0.8em; color: var(--text-color, #4b5563);">{doc_id}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-size: 0.85em; color: var(--text-color, #374151);">{raw_value}</td><td style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-weight: 600; font-size: 0.85em; color: var(--success-color, #059669);">{cleaned_str}</td></tr>"""
+				
+				if len(id_value_pairs) > display_count:
+					html_content += f"""<tr style="background: var(--info-bg, #dbeafe);"><td colspan="{colspan_count}" style="border: 1px solid var(--border-color, #d1d5db); padding: 6px 4px; text-align: center; font-style: italic; font-size: 0.85em; color: var(--text-color, #4b5563);">... و {len(id_value_pairs) - display_count} مورد دیگر</td></tr>"""
+				
+				# Build summary section based on requested operations (only if statistics are needed)
+				summary_html = ""
+				if any_statistics_needed:
+					summary_items = []
+					summary_items.append(f'<div style="padding: 6px 8px; background: var(--item-bg, white); border-radius: 4px; border-left: 3px solid var(--border-color, #d1d5db);"><span style="font-weight: 600; color: var(--text-color, #374151);">تعداد کل مقادیر:</span> <span style="color: var(--text-color, #6b7280);">{len(id_value_pairs):,}</span></div>')
+					summary_items.append(f'<div style="padding: 6px 8px; background: var(--item-bg, white); border-radius: 4px; border-left: 3px solid var(--border-color, #d1d5db);"><span style="font-weight: 600; color: var(--text-color, #374151);">تعداد مقادیر معتبر (عددی):</span> <span style="color: var(--text-color, #6b7280);">{len(cleaned_values):,}</span></div>')
+				
+				# Statistical measures with different colors
+				if needs_sum:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--success-bg, #ecfdf5); border-radius: 4px; border-left: 4px solid var(--success-color, #10b981);"><span style="font-weight: 600; color: var(--text-color, #374151);">جمع مقادیر:</span> <span style="color: var(--success-color, #059669); font-size: 1.1em; font-weight: 700;">{sum_result:,.2f}</span></div>')
+				
+				if needs_average:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--info-bg, #dbeafe); border-radius: 4px; border-left: 4px solid var(--info-color, #3b82f6);"><span style="font-weight: 600; color: var(--text-color, #374151);">میانگین مقادیر:</span> <span style="color: var(--info-color, #1d4ed8); font-size: 1.1em; font-weight: 700;">{average_result:,.2f}</span></div>')
+				
+				if needs_min:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--warning-bg, #fef3c7); border-radius: 4px; border-left: 4px solid var(--warning-color, #f59e0b);"><span style="font-weight: 600; color: var(--text-color, #374151);">حداقل مقدار:</span> <span style="color: var(--warning-color, #d97706); font-size: 1.1em; font-weight: 700;">{min_result:,.2f}</span></div>')
+				
+				if needs_max:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--error-bg, #fee2e2); border-radius: 4px; border-left: 4px solid var(--error-color, #ef4444);"><span style="font-weight: 600; color: var(--text-color, #374151);">حداکثر مقدار:</span> <span style="color: var(--error-color, #dc2626); font-size: 1.1em; font-weight: 700;">{max_result:,.2f}</span></div>')
+				
+				if needs_count:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--purple-bg, #f3e8ff); border-radius: 4px; border-left: 4px solid var(--purple-color, #8b5cf6);"><span style="font-weight: 600; color: var(--text-color, #374151);">فراوانی (تعداد):</span> <span style="color: var(--purple-color, #7c3aed); font-size: 1.1em; font-weight: 700;">{count_result:,}</span></div>')
+				
+				if needs_std:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--teal-bg, #f0fdfa); border-radius: 4px; border-left: 4px solid var(--teal-color, #14b8a6);"><span style="font-weight: 600; color: var(--text-color, #374151);">انحراف معیار:</span> <span style="color: var(--teal-color, #0d9488); font-size: 1.1em; font-weight: 700;">{std_result:,.2f}</span></div>')
+				
+				if needs_median:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--indigo-bg, #e0e7ff); border-radius: 4px; border-left: 4px solid var(--indigo-color, #6366f1);"><span style="font-weight: 600; color: var(--text-color, #374151);">میانه:</span> <span style="color: var(--indigo-color, #4f46e5); font-size: 1.1em; font-weight: 700;">{median_result:,.2f}</span></div>')
+				
+				if needs_mode:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--pink-bg, #fce7f3); border-radius: 4px; border-left: 4px solid var(--pink-color, #ec4899);"><span style="font-weight: 600; color: var(--text-color, #374151);">نما (مد):</span> <span style="color: var(--pink-color, #db2777); font-size: 1.1em; font-weight: 700;">{mode_result:,.2f}</span></div>')
+				
+				if needs_variance:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--orange-bg, #fed7aa); border-radius: 4px; border-left: 4px solid var(--orange-color, #ea580c);"><span style="font-weight: 600; color: var(--text-color, #374151);">واریانس:</span> <span style="color: var(--orange-color, #c2410c); font-size: 1.1em; font-weight: 700;">{variance:,.2f}</span></div>')
+				
+				if needs_range:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--cyan-bg, #cffafe); border-radius: 4px; border-left: 4px solid var(--cyan-color, #06b6d4);"><span style="font-weight: 600; color: var(--text-color, #374151);">دامنه:</span> <span style="color: var(--cyan-color, #0891b2); font-size: 1.1em; font-weight: 700;">{range_result:,.2f}</span></div>')
+				
+				if needs_growth:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--emerald-bg, #d1fae5); border-radius: 4px; border-left: 4px solid var(--emerald-color, #10b981);"><span style="font-weight: 600; color: var(--text-color, #374151);">نرخ رشد:</span> <span style="color: var(--emerald-color, #059669); font-size: 1.1em; font-weight: 700;">{growth_rate:,.2f}%</span></div>')
+				
+				if needs_decline:
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--rose-bg, #fecaca); border-radius: 4px; border-left: 4px solid var(--rose-color, #f43f5e);"><span style="font-weight: 600; color: var(--text-color, #374151);">نرخ کاهش:</span> <span style="color: var(--rose-color, #e11d48); font-size: 1.1em; font-weight: 700;">{decline_rate:,.2f}%</span></div>')
+				
+				if needs_trend:
+					trend_color = "#10b981" if trend_result == "صعودی" else "#ef4444" if trend_result == "نزولی" else "#6b7280"
+					summary_items.append(f'<div style="padding: 8px 10px; background: var(--gray-bg, #f3f4f6); border-radius: 4px; border-left: 4px solid {trend_color};"><span style="font-weight: 600; color: var(--text-color, #374151);">روند کلی:</span> <span style="color: {trend_color}; font-size: 1.1em; font-weight: 700;">{trend_result}</span></div>')
+				
+				summary_html = "".join(summary_items)
+				
+				# Add summary section only if statistics are needed
+				if any_statistics_needed:
+					html_content += f"""</tbody></table></div><div style="background: var(--summary-bg, #f9fafb); padding: 12px; border-radius: 6px; margin: 12px 0 0 0; border: 1px solid var(--border-color, #d1d5db);"><h4 style="margin: 0 0 8px 0; padding: 0; font-size: 0.95em; color: var(--text-color, #1f2937);">📊 خلاصه محاسبات:</h4><div style="display: flex; flex-direction: column; gap: 6px;">{summary_html}</div></div></div>"""
+				else:
+					html_content += f"""</tbody></table></div></div>"""
+				
+				return ChatResponse(message=html_content)
+			else:
+				return ChatResponse(message="❌ Elasticsearch غیرفعال است")
+		except Exception as e:
+			return ChatResponse(message=f"❌ خطا: {str(e)}")
+
 	# Check if this is an ES query using the new advanced handler
 	if es_query_handler.is_enabled():
 		query_params = es_query_handler.parse_query(req.message)
@@ -1056,8 +1336,14 @@ def chat(req: ChatRequest) -> ChatResponse:
 			return ChatResponse(message="\n".join(lines))
 		# Only check for charts if this is NOT an ES query
 		chart_request_detected = None
-		if not (es_query_handler.is_enabled() and es_query_handler.parse_query(req.message).query_type.value != "unknown"):
+		if es_query_handler.is_enabled():
+			query_params = es_query_handler.parse_query(req.message)
+			# Only check for charts if it's NOT an ES query (unknown, or not aggregate/list_and_sum)
+			if query_params.query_type.value == "unknown" or query_params.query_type.value not in ["aggregate", "list_and_sum"]:
+				chart_request_detected = detect_chart_request(req.message)
+		else:
 			chart_request_detected = detect_chart_request(req.message)
+		
 		if chart_request_detected:
 			print(f"📊 Chart request detected: {chart_request_detected}")
 		

@@ -2,6 +2,8 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import './App.css'
 import ChartComponent from './components/ChartComponent'
 import DatabasePopup from './components/DatabasePopup'
+import AuthPanel from './components/AuthPanel'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
 
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
 interface Relationship { id?: string; source_entity_id: string; target_entity_id: string; type: string; attributes?: Record<string, any> }
@@ -74,7 +76,7 @@ interface EsIndicesResponse {
   error?: string
 }
 
-function App() {
+function InnerApp() {
   const REQUEST_TIMEOUT_MS = 130000
 
   const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) => {
@@ -150,6 +152,7 @@ function App() {
   const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
   const [darkMode, setDarkMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [authOpen, setAuthOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'chat' | 'analysis' | 'general'>('chat')
   const [databasePopupOpen, setDatabasePopupOpen] = useState(false)
   
@@ -1236,6 +1239,7 @@ function App() {
             >
               ⚙️
             </button>
+            <AuthButton onOpen={() => setAuthOpen(true)} />
             
             {/* Database Status Indicator */}
             <div 
@@ -2037,8 +2041,26 @@ function App() {
           esInfo={esInfo}
         />
       </div>
+
+      {/* Auth Panel */}
+      <AuthPanel isOpen={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   )
 }
 
-export default App
+function AuthButton({ onOpen }: { onOpen: () => void }) {
+  const { user } = useAuth()
+  return (
+    <button className='settings-btn' onClick={onOpen} title={user ? 'پروفایل/مدیریت' : 'ورود/ثبت‌نام'}>
+      {user ? '👤' : '🔑'}
+    </button>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <InnerApp />
+    </AuthProvider>
+  )
+}
