@@ -46,7 +46,7 @@ const translations: Translations = {
   'chat.model.judge': { fa: '⚖️ مدل داور چت', en: '⚖️ Chat judge model', ar: '⚖️ نموذج حكم الدردشة' },
   'chat.model.judge.select': { fa: 'انتخاب مدل داور...', en: 'Select judge model...', ar: 'اختر نموذج الحكم...' },
   'chat.welcome.1': { fa: '👋 سلام! من Mentora هستم دستیار هوش مصنوعی.', en: '👋 Hello! I am Mentora, the AI assistant.', ar: '👋 مرحبا! أنا Mentora، مساعد الذكاء الاصطناعي.' },
-  'chat.welcome.2': { fa: 'می‌توانم در تحلیل متون تخصصی به شما کمک کنم و نمودارهای مختلف بکشم.', en: 'I can help analyze specialized texts and draw various charts.', ar: 'أستطيع المساعدة في تحليل النصوص المتخصصة ورسم مخططات مختلفة.' },
+  'chat.welcome.2': { fa: 'می‌توانم در تحلیل تصاویر تخصصی چشم و تشخیص بهتر بیماری‌ها به شما کمک کنم.', en: 'I can help analyze specialized eye images and better diagnose diseases.', ar: 'أستطيع المساعدة في تحليل صور العين المتخصصة وتشخيص أفضل للأمراض.' },
   'chat.welcome.3': { fa: '💡 مثال: "یک نمودار میله‌ای از روند بهبود بیماری بیمار بکش" یا "نمودار دایره‌ای از توزیع جمعیت نشان بده"', en: '💡 Example: "Draw a bar chart of patient recovery progress" or "Show a pie chart of population distribution"', ar: '💡 مثال: "ارسم مخططًا شريطيًا لتقدم شفاء المريض" أو "اعرض مخططًا دائريًا لتوزيع السكان"' },
   'chat.processing': { fa: 'در حال پردازش...', en: 'Processing...', ar: 'جارٍ المعالجة...' },
   'chat.placeholder': { fa: 'پیام خود را بنویسید... (Shift+Enter برای خط جدید)', en: 'Type your message... (Shift+Enter for new line)', ar: 'اكتب رسالتك... (Shift+Enter لسطر جديد)' },

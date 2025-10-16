@@ -104,7 +104,7 @@ body {
     radial-gradient(1000px 500px at -10% 120%, rgba(56, 189, 248, 0.2), transparent 60%),
     linear-gradient(180deg, #0b1020 0%, #0c1224 100%);
   color: var(--text);
-  font-family: Vazirmatn, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: system-ui, sans-serif;
 }
 
 ::selection {

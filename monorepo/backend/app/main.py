@@ -1,7 +1,7 @@
 import os
 import sys
 import httpx
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,8 +23,8 @@ if SHARED_DIR not in sys.path:
 # System Identity Configuration
 SYSTEM_NAME = "Mentora"
 SYSTEM_NAME_ENGLISH = "Mentora"
-DEVELOPER_NAME = "سرهنگ مهندس علی سلیمی"
-DEVELOPER_NAME_ENGLISH = "Engineer Colonel Ali Salimi"
+DEVELOPER_NAME = "مهندس علی سلیمی و تیم هوش مصنوعی Mentora"
+DEVELOPER_NAME_ENGLISH = "Engineer Ali Salimi and Mentora AI Team"
 ORGANIZATION = "Mentora"
 
 def get_system_identity_response() -> str:
@@ -540,6 +540,8 @@ def get_ollama_models() -> Dict[str, Any]:
 		import subprocess
 		import json
 		
+		print("🔄 Attempting to get Ollama models...")
+		
 		# Try ollama list with JSON first
 		result = subprocess.run(
 			["ollama", "list", "--json"], 
@@ -547,6 +549,10 @@ def get_ollama_models() -> Dict[str, Any]:
 			text=True, 
 			timeout=10
 		)
+		
+		print(f"📡 Ollama JSON command result: returncode={result.returncode}")
+		print(f"📡 stdout: {result.stdout[:200]}...")
+		print(f"📡 stderr: {result.stderr}")
 		
 		if result.returncode == 0:
 			try:
@@ -559,12 +565,14 @@ def get_ollama_models() -> Dict[str, Any]:
 						if "name" in model:
 							models.append(model["name"])
 				
+				print(f"✅ Found {len(models)} models via JSON: {models}")
 				return {
 					"status": "success",
 					"models": models,
 					"count": len(models)
 				}
-			except json.JSONDecodeError:
+			except json.JSONDecodeError as e:
+				print(f"⚠️ JSON decode error: {e}")
 				pass  # Fall through to text parsing
 		
 		# Try regular ollama list (text format)
@@ -596,6 +604,7 @@ def get_ollama_models() -> Dict[str, Any]:
 		else:
 			# Return some default models if ollama command fails
 			default_models = ["gemma3:4b", "qwen2.5:7b", "gemma2:9b", "llama3:8b"]
+			print(f"⚠️ Ollama command failed, using fallback models: {default_models}")
 			return {
 				"status": "fallback",
 				"models": default_models,
@@ -606,6 +615,7 @@ def get_ollama_models() -> Dict[str, Any]:
 	except Exception as e:
 		# Return fallback models in case of any error
 		default_models = ["gemma3:4b", "qwen2.5:7b", "gemma2:9b", "llama3:8b"]
+		print(f"❌ Exception in get_ollama_models: {e}")
 		return {
 			"status": "error",
 			"models": default_models,
@@ -864,6 +874,53 @@ def multi_extract(req: MultiModelRequest) -> MultiModelResponse:
 	except Exception as e:
 		raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
+
+
+@app.post("/api/chat-with-images")
+async def chat_with_images(
+	message: str = Form(...),
+	language: str = Form("fa"),
+	domain: str = Form("general"),
+	model: str = Form(None),
+	analysisMode: str = Form("single"),
+	message_history: str = Form("[]"),
+	model_first: str = Form(None),
+	model_second: str = Form(None),
+	model_referee: str = Form(None),
+	images: List[UploadFile] = File(None)
+) -> ChatResponse:
+	"""Chat endpoint with image support"""
+	if not message or not message.strip():
+		raise HTTPException(status_code=400, detail="'message' is required")
+
+	# Check if images are provided
+	if images and len(images) > 0:
+		# For now, return the image processing message
+		return ChatResponse(
+			message="در حال حاضر سرویس پردازش تصویر در حال پیاده سازی است و به زودی قابل استفاده خواهد بود"
+		)
+
+	# If no images, process as regular chat
+	import json
+	try:
+		message_history_data = json.loads(message_history) if message_history else []
+	except:
+		message_history_data = []
+
+	# Create ChatRequest object for regular processing
+	chat_req = ChatRequest(
+		message=message,
+		language=language,
+		domain=domain,
+		model=model,
+		analysisMode=analysisMode,
+		message_history=message_history_data,
+		model_first=model_first,
+		model_second=model_second,
+		model_referee=model_referee
+	)
+	
+	return chat(chat_req)
 
 @app.post("/api/chat", response_model=ChatResponse)
 def chat(req: ChatRequest) -> ChatResponse:

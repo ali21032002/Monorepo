@@ -6,6 +6,40 @@ import AuthPanel from './components/AuthPanel'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { useI18n } from './contexts/I18nContext'
 
+// Function to translate model names to Persian
+const translateModelName = (modelName: string): string => {
+  const modelTranslations: Record<string, string> = {
+    'gemma2:9b': 'مدل اول با 2:9 بیلیون پارامتر',
+    'gemma2:2b': 'مدل دوم با 2:2 بیلیون پارامتر',
+    'gemma3:4b': 'مدل سوم با 3:4 بیلیون پارامتر',
+    'qwen2.5:7b': 'مدل چهارم با 2.5:7 بیلیون پارامتر',
+    'qwen2.5.2:7b': 'مدل پنجم با 2.5.2:7 بیلیون پارامتر',
+    'llama3:8b': 'مدل ششم با 3:8 بیلیون پارامتر',
+    'llava:7b': 'مدل هفتم با 7 بیلیون پارامتر',
+    'mistral:7b': 'مدل هشتم با 7 بیلیون پارامتر',
+    'codellama:7b': 'مدل نهم با 7 بیلیون پارامتر',
+    'phi3:3.8b': 'مدل دهم با 3:3.8 بیلیون پارامتر',
+    'deepseek-coder:6.7b': 'مدل یازدهم با 6.7 بیلیون پارامتر',
+    'gemma2:latest': 'مدل دوازدهم (آخرین نسخه)',
+    'gemma3:latest': 'مدل سیزدهم (آخرین نسخه)',
+    'qwen2.5:latest': 'مدل چهاردهم (آخرین نسخه)',
+    'llama3:latest': 'مدل پانزدهم (آخرین نسخه)',
+    'mistral:latest': 'مدل شانزدهم (آخرین نسخه)',
+    'codellama:latest': 'مدل هفدهم (آخرین نسخه)',
+    'phi3:latest': 'مدل هجدهم (آخرین نسخه)',
+    'deepseek-coder:latest': 'مدل نوزدهم (آخرین نسخه)',
+    'llava:latest': 'مدل بیستم (آخرین نسخه)'
+  }
+  
+  // Check if it's a :latest model that's not in our list
+  if (modelName.endsWith(':latest') && !modelTranslations[modelName]) {
+    const baseModel = modelName.replace(':latest', '')
+    return `${baseModel} (آخرین نسخه)`
+  }
+  
+  return modelTranslations[modelName] || modelName
+}
+
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
 interface Relationship { id?: string; source_entity_id: string; target_entity_id: string; type: string; attributes?: Record<string, any> }
 interface ExtractionResponse { text: string; language: string; model: string; entities: Entity[]; relationships: Relationship[] }
@@ -141,12 +175,50 @@ function InnerApp() {
   const [chatInput, setChatInput] = useState('')
   const [chatInputRef, setChatInputRef] = useState<HTMLTextAreaElement | null>(null)
   const [isRecording, setIsRecording] = useState(false)
+  const [uploadedImages, setUploadedImages] = useState<File[]>([])
+  const [imagePreviewUrls, setImagePreviewUrls] = useState<string[]>([])
   
   // Auto-resize textarea function
   const autoResizeTextarea = (textarea: HTMLTextAreaElement) => {
     textarea.style.height = 'auto'
     textarea.style.height = Math.min(textarea.scrollHeight, 128) + 'px' // Max height of 8rem (128px)
   }
+
+  // Handle image upload
+  const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (!files) return
+
+    const newImages: File[] = []
+    const newPreviewUrls: string[] = []
+
+    Array.from(files).forEach(file => {
+      if (file.type.startsWith('image/')) {
+        newImages.push(file)
+        const url = URL.createObjectURL(file)
+        newPreviewUrls.push(url)
+      }
+    })
+
+    setUploadedImages(prev => [...prev, ...newImages])
+    setImagePreviewUrls(prev => [...prev, ...newPreviewUrls])
+  }
+
+  // Remove image
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== index))
+    setImagePreviewUrls(prev => {
+      URL.revokeObjectURL(prev[index])
+      return prev.filter((_, i) => i !== index)
+    })
+  }
+
+  // Cleanup image URLs on unmount
+  useEffect(() => {
+    return () => {
+      imagePreviewUrls.forEach(url => URL.revokeObjectURL(url))
+    }
+  }, [imagePreviewUrls])
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null)
   const [chatLoading, setChatLoading] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
@@ -322,11 +394,16 @@ function InnerApp() {
   const loadModels = async () => {
     setModelsLoading(true)
     try {
+      console.log('🔄 Loading models from /api/models...')
       const resp = await fetchWithTimeout('/api/models')
+      console.log('📡 Response status:', resp.status, resp.statusText)
+      
       if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`)
       const data = await resp.json()
+      console.log('📊 Models data received:', data)
       
       if (data.models && data.models.length > 0) {
+        console.log('✅ Setting models:', data.models)
         setAvailableModels(data.models)
         
         if (!model && data.models.length > 0) setModel(data.models[0])
@@ -334,10 +411,13 @@ function InnerApp() {
         if (!modelSecond && data.models.length > 1) setModelSecond(data.models[1])
         if (!modelReferee && data.models.length > 2) setModelReferee(data.models[2])
         else if (!modelReferee && data.models.length > 0) setModelReferee(data.models[0])
+      } else {
+        console.warn('⚠️ No models found in response')
       }
     } catch (e: any) {
-      console.error('Failed to load models:', e)
+      console.error('❌ Failed to load models:', e)
       const fallbackModels = ['gemma3:4b', 'qwen2.5.2:7b', 'llava:7b']
+      console.log('🔄 Using fallback models:', fallbackModels)
       setAvailableModels(fallbackModels)
       setModel(fallbackModels[0])
       setModelFirst(fallbackModels[0])
@@ -541,7 +621,7 @@ function InnerApp() {
 
   // Chat functions
   const sendChatMessage = async (message: string, isAudio = false, audioUrl?: string) => {
-    if (!message.trim() && !isAudio) return
+    if (!message.trim() && !isAudio && uploadedImages.length === 0) return
     
     // Detect chart request
     const chartRequestType = detectChartRequest(message)
@@ -745,6 +825,60 @@ function InnerApp() {
         console.log('📝 Context contains questions')
       }
 
+      // Check if we have images to send
+      if (uploadedImages.length > 0) {
+        // Send images with FormData
+        const formData = new FormData()
+        formData.append('message', message)
+        formData.append('language', language)
+        formData.append('domain', domain)
+        formData.append('model', model || modelReferee || 'gemma3:4b')
+        formData.append('analysisMode', chatMode)
+        formData.append('message_history', JSON.stringify(recentMessages))
+        
+        if (chatMode === 'multi') {
+          formData.append('model_first', modelFirst || 'gemma3:4b')
+          formData.append('model_second', modelSecond || 'qwen2.5:7b')
+          formData.append('model_referee', modelReferee || 'llama3:8b')
+        }
+        
+        // Add images
+        uploadedImages.forEach((image) => {
+          formData.append(`images`, image)
+        })
+        
+        const resp = await fetchWithTimeout('/api/chat-with-images', {
+          method: 'POST',
+          body: formData
+        })
+        
+        // Clear uploaded images after sending
+        setUploadedImages([])
+        setImagePreviewUrls(prev => {
+          prev.forEach(url => URL.revokeObjectURL(url))
+          return []
+        })
+        
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`)
+        }
+        
+        const data = await resp.json()
+        
+        // Handle response (always image processing message for now)
+        const assistantMessage: ChatMessage = {
+          id: (Date.now() + 1).toString(),
+          type: 'assistant',
+          content: data.response || 'در حال حاضر سرویس پردازش تصویر در حال پیاده سازی است و به زودی قابل استفاده خواهد بود',
+          timestamp: new Date()
+        }
+        setChatMessages(prev => [...prev, assistantMessage])
+        setChatLoading(false)
+        setTimeout(() => scrollToBottom(), 100)
+        return
+      }
+      
+      // Regular text-only request
       const resp = await fetchWithTimeout('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1363,7 +1497,7 @@ function InnerApp() {
                       <option value=''>{t('chat.model.select')}</option>
                       {availableModels.map((modelName) => (
                         <option key={modelName} value={modelName}>
-                          {modelName}
+                          {translateModelName(modelName)}
                         </option>
                       ))}
                     </select>
@@ -1381,7 +1515,7 @@ function InnerApp() {
                           <option value=''>{t('chat.model.second.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
-                              {modelName}
+                              {translateModelName(modelName)}
                             </option>
                           ))}
                         </select>
@@ -1397,7 +1531,7 @@ function InnerApp() {
                           <option value=''>{t('chat.model.judge.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
-                              {modelName}
+                              {translateModelName(modelName)}
                             </option>
                           ))}
                         </select>
@@ -1452,7 +1586,7 @@ function InnerApp() {
                       <option value=''>{t('analysis.model.select')}</option>
                       {availableModels.map((modelName) => (
                         <option key={modelName} value={modelName}>
-                          {modelName}
+                          {translateModelName(modelName)}
                         </option>
                       ))}
                     </select>
@@ -1470,7 +1604,7 @@ function InnerApp() {
                           <option value=''>{t('analysis.model.second.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
-                              {modelName}
+                              {translateModelName(modelName)}
                             </option>
                           ))}
                         </select>
@@ -1486,7 +1620,7 @@ function InnerApp() {
                           <option value=''>{t('analysis.model.judge.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
-                              {modelName}
+                              {translateModelName(modelName)}
                             </option>
                           ))}
                         </select>
@@ -1960,6 +2094,30 @@ function InnerApp() {
               </div>
               
               <div className='chat-input-area'>
+                {/* Image Preview Area */}
+                {imagePreviewUrls.length > 0 && (
+                  <div className='image-preview-container'>
+                    <div className='image-preview-grid'>
+                      {imagePreviewUrls.map((url, index) => (
+                        <div key={index} className='image-preview-item'>
+                          <img 
+                            src={url} 
+                            alt={`Preview ${index + 1}`}
+                            className='image-preview'
+                          />
+                          <button
+                            className='image-remove-btn'
+                            onClick={() => removeImage(index)}
+                            title='حذف تصویر'
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
                 <div className='chat-input-container'>
                   <textarea
                     ref={setChatInputRef}
@@ -1984,7 +2142,7 @@ function InnerApp() {
                   <button
                     className='btn btn-primary chat-send-btn'
                     onClick={() => sendChatMessage(chatInput)}
-                    disabled={chatLoading || (!chatInput.trim())}
+                    disabled={chatLoading || (!chatInput.trim() && uploadedImages.length === 0)}
                     title={t('chat.send')}
                   >
                     ➤
@@ -2017,6 +2175,24 @@ function InnerApp() {
                     title={t('chat.audio.tooltip')}
                   >
                     {t('chat.audio.upload')}
+                  </label>
+                  
+                  {/* Image Upload for Chat */}
+                  <input 
+                    type='file' 
+                    id='chat-image-input'
+                    accept='image/*'
+                    multiple
+                    onChange={handleImageUpload} 
+                    style={{ display: 'none' }}
+                    disabled={chatLoading}
+                  />
+                  <label 
+                    htmlFor='chat-image-input' 
+                    className={`btn btn-outline chat-image-upload-btn ${chatLoading ? 'disabled' : ''}`}
+                    title='آپلود تصویر'
+                  >
+                    📷 تصویر
                   </label>
                   {speechModels && (
                     <div className='chat-speech-status' style={{fontSize: '0.75rem', color: '#6b7280', marginTop: '4px'}}>
