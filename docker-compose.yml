@@ -51,9 +51,27 @@ services:
     environment:
       - VITE_API_URL=http://localhost:8000
       - VITE_SPEECH_URL=http://localhost:8001
+      - VITE_USER_API_URL=http://localhost:8002
     depends_on:
       - backend
       - speech-to-text
+    restart: unless-stopped
+
+  # User Management Microservice
+  user-service:
+    build:
+      context: ./monorepo/user_service
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - USER_DB_URL=sqlite:////data/users.db
+      - USER_JWT_SECRET=dev_change_me
+      - ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      - ALLOW_ORIGIN_REGEX=^(http://localhost:5173|http://127.0.0.1:5173)$
+    volumes:
+      - user-data:/data
     restart: unless-stopped
 
   # Ollama Service
@@ -70,3 +88,4 @@ services:
 volumes:
   whisper-models:
   ollama-data:
+  user-data:

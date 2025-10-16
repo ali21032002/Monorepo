@@ -2,6 +2,9 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import './App.css'
 import ChartComponent from './components/ChartComponent'
 import DatabasePopup from './components/DatabasePopup'
+import AuthPanel from './components/AuthPanel'
+import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { useI18n } from './contexts/I18nContext'
 
 interface Entity { id?: string; name: string; type: string; attributes?: Record<string, any> }
 interface Relationship { id?: string; source_entity_id: string; target_entity_id: string; type: string; attributes?: Record<string, any> }
@@ -74,7 +77,8 @@ interface EsIndicesResponse {
   error?: string
 }
 
-function App() {
+function InnerApp() {
+  const { t, locale, setLocale, direction } = useI18n()
   const REQUEST_TIMEOUT_MS = 130000
 
   const fetchWithTimeout = async (input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = REQUEST_TIMEOUT_MS) => {
@@ -112,7 +116,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'analysis' | 'chat'>('analysis')
   
   // Common settings
-  const [language, setLanguage] = useState<'fa' | 'en'>('fa')
+  const [language, setLanguage] = useState<'fa' | 'en' | 'ar'>(locale)
   const [domain, setDomain] = useState<'general' | 'legal' | 'medical' | 'police'>('police')
   const [error, setError] = useState<string | null>(null)
   
@@ -150,6 +154,7 @@ function App() {
   const [chatMode, setChatMode] = useState<'single' | 'multi'>('single')
   const [darkMode, setDarkMode] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [authOpen, setAuthOpen] = useState(false)
   const [settingsTab, setSettingsTab] = useState<'chat' | 'analysis' | 'general'>('chat')
   const [databasePopupOpen, setDatabasePopupOpen] = useState(false)
   
@@ -159,7 +164,7 @@ function App() {
 
   // Elasticsearch status
   const [esInfo, setEsInfo] = useState<EsIndicesResponse | null>(null)
-  const [esLoading, setEsLoading] = useState<boolean>(false)
+  const [, setEsLoading] = useState<boolean>(false)
 
   // Apply dark mode to body and html
   useEffect(() => {
@@ -171,6 +176,17 @@ function App() {
       document.body.classList.remove('dark-mode')
     }
   }, [darkMode])
+
+  // Sync app language with i18n provider
+  useEffect(() => {
+    setLanguage(locale)
+  }, [locale])
+
+  useEffect(() => {
+    setLocale(language)
+    // Update document title when language changes
+    document.title = t('app.title')
+  }, [language])
   
   // Ref for auto-scrolling chat messages
   const chatMessagesEndRef = useRef<HTMLDivElement>(null)
@@ -1215,13 +1231,13 @@ function App() {
 
   return (
     <div className={`app ${darkMode ? 'dark-mode' : ''}`}>
-      <header className='hero'>
+      <header className='hero' style={{ direction }}>
         <div className='header-content'>
           <div className='header-controls'>
             <div 
               className={`theme-toggle ${darkMode ? 'dark' : 'light'}`}
               onClick={() => setDarkMode(!darkMode)}
-              title={darkMode ? 'تغییر به تم روشن' : 'تغییر به تم تاریک'}
+              title={darkMode ? t('theme.toLight') : t('theme.toDark')}
             >
               <div className='toggle-track'>
                 <div className='toggle-thumb'>
@@ -1232,20 +1248,21 @@ function App() {
             <button 
               className='settings-btn'
               onClick={() => setSettingsOpen(!settingsOpen)}
-              title='تنظیمات چت'
+              title={t('settings.title')}
             >
               ⚙️
             </button>
+            <AuthButton onOpen={() => setAuthOpen(true)} />
             
             {/* Database Status Indicator */}
             <div 
               className={`database-status ${esInfo?.enabled && !esInfo?.error ? 'active' : 'inactive'}`}
               onClick={() => esInfo?.enabled && !esInfo?.error && setDatabasePopupOpen(true)}
-              title={esInfo?.enabled ? (esInfo?.error ? `خطای پایگاه داده: ${esInfo.error}` : 'مشاهده ساختار پایگاه داده') : 'اتصال به پایگاه داده غیرفعال'}
+              title={esInfo?.enabled ? (esInfo?.error ? `${t('db.connection')}: ${esInfo.error}` : t('db.view.structure')) : t('db.inactive')}
             >
               <span className='db-icon'>🗄️</span>
               <span className='db-text'>
-                اتصال به پایگاه داده ({esInfo?.enabled && !esInfo?.error ? 'فعال' : 'غیرفعال'})
+                {t('db.connection')} ({esInfo?.enabled && !esInfo?.error ? t('active') : t('inactive')})
               </span>
             </div>
 
@@ -1260,23 +1277,23 @@ function App() {
               </div>
               <div className='status-text'>
                 {activeTab === 'chat' ? (
-                  chatMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+                  chatMode === 'multi' ? t('chat.mode.multi') : t('chat.mode.single')
                 ) : (
-                  analysisMode === 'multi' ? 'داوری چندمدله' : 'تک مدل'
+                  analysisMode === 'multi' ? t('chat.mode.multi') : t('chat.mode.single')
                 )}
               </div>
             </div>
           </div>
           <div className='header-text'>
-            <h1 className='title'>مرکز مدیریت و تحلیل داده فراجا</h1>
-            <p className='subtitle'>سیستم هوشمند تحلیل متن با قابلیت داوری توسط چند مدل مختلف</p>
+            <h1 className='title'>{t('app.title')}</h1>
+            <p className='subtitle'>{t('app.subtitle')}</p>
             <div className='header-description'>
               <div className='description-item'>
                 <span className='description-icon'>
                   {activeTab === 'chat' ? '🤖' : '🔗'}
                 </span>
                 <span className='description-text'>
-                  {activeTab === 'chat' ? 'دستیار تعاملی هوشمند' : 'استخراج روابط چند گانه از متن'}
+                  {activeTab === 'chat' ? t('header.desc.chat') : t('header.desc.analysis')}
                 </span>
               </div>
             </div>
@@ -1289,12 +1306,12 @@ function App() {
         <div className='settings-popup-overlay' onClick={() => setSettingsOpen(false)}>
           <div className='settings-popup' onClick={(e) => e.stopPropagation()}>
             <div className='settings-header'>
-              <h3>⚙️ تنظیمات سیستم</h3>
+              <h3>{t('settings.title')}</h3>
               <button 
                 className='settings-confirm'
                 onClick={() => setSettingsOpen(false)}
               >
-                ✓ تایید
+                {t('settings.confirm')}
               </button>
             </div>
             
@@ -1304,19 +1321,19 @@ function App() {
                 className={`settings-tab ${settingsTab === 'chat' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('chat')}
               >
-                💬 چت
+                {t('tab.chat')}
               </button>
               <button 
                 className={`settings-tab ${settingsTab === 'analysis' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('analysis')}
               >
-                📊 تحلیل
+                {t('tab.analysis')}
               </button>
               <button 
                 className={`settings-tab ${settingsTab === 'general' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('general')}
               >
-                ⚙️ عمومی
+                {t('tab.general')}
               </button>
             </div>
             
@@ -1325,7 +1342,7 @@ function App() {
               {settingsTab === 'chat' && (
                 <div className='settings-tab-content'>
                   <div className='settings-section'>
-                    <h4>🎯 حالت چت</h4>
+                    <h4>{t('chat.mode.title')}</h4>
                     <div className='settings-options'>
                       <label className='settings-option'>
                         <input
@@ -1335,7 +1352,7 @@ function App() {
                           checked={chatMode === 'single'}
                           onChange={(e) => setChatMode(e.target.value as 'single' | 'multi')}
                         />
-                        <span>تک مدل</span>
+                        <span>{t('chat.mode.single')}</span>
                       </label>
                       <label className='settings-option'>
                         <input
@@ -1345,13 +1362,13 @@ function App() {
                           checked={chatMode === 'multi'}
                           onChange={(e) => setChatMode(e.target.value as 'single' | 'multi')}
                         />
-                        <span>چند مدل</span>
+                        <span>{t('chat.mode.multi')}</span>
                       </label>
                     </div>
                   </div>
                   
                   <div className='settings-section'>
-                    <h4>🤖 مدل چت</h4>
+                    <h4>{t('chat.model.title')}</h4>
                     <select 
                       value={chatMode === 'single' ? model : modelFirst}
                       onChange={(e) => {
@@ -1363,7 +1380,7 @@ function App() {
                       }}
                       className='settings-select'
                     >
-                      <option value=''>انتخاب مدل...</option>
+                      <option value=''>{t('chat.model.select')}</option>
                       {availableModels.map((modelName) => (
                         <option key={modelName} value={modelName}>
                           {modelName}
@@ -1375,13 +1392,13 @@ function App() {
                   {chatMode === 'multi' && (
                     <>
                       <div className='settings-section'>
-                        <h4>🤖 مدل دوم چت</h4>
+                        <h4>{t('chat.model.second')}</h4>
                         <select 
                           value={modelSecond}
                           onChange={(e) => setModelSecond(e.target.value)}
                           className='settings-select'
                         >
-                          <option value=''>انتخاب مدل دوم...</option>
+                          <option value=''>{t('chat.model.second.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
                               {modelName}
@@ -1391,13 +1408,13 @@ function App() {
                       </div>
                       
                       <div className='settings-section'>
-                        <h4>⚖️ مدل داور چت</h4>
+                        <h4>{t('chat.model.judge')}</h4>
                         <select 
                           value={modelReferee}
                           onChange={(e) => setModelReferee(e.target.value)}
                           className='settings-select'
                         >
-                          <option value=''>انتخاب مدل داور...</option>
+                          <option value=''>{t('chat.model.judge.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
                               {modelName}
@@ -1414,7 +1431,7 @@ function App() {
               {settingsTab === 'analysis' && (
                 <div className='settings-tab-content'>
                   <div className='settings-section'>
-                    <h4>📊 حالت تحلیل</h4>
+                    <h4>{t('analysis.mode.title')}</h4>
                     <div className='settings-options'>
                       <label className='settings-option'>
                         <input
@@ -1424,7 +1441,7 @@ function App() {
                           checked={analysisMode === 'single'}
                           onChange={(e) => setAnalysisMode(e.target.value as 'single' | 'multi')}
                         />
-                        <span>تک مدل</span>
+                        <span>{t('chat.mode.single')}</span>
                       </label>
                       <label className='settings-option'>
                         <input
@@ -1434,13 +1451,13 @@ function App() {
                           checked={analysisMode === 'multi'}
                           onChange={(e) => setAnalysisMode(e.target.value as 'single' | 'multi')}
                         />
-                        <span>چند مدل</span>
+                        <span>{t('chat.mode.multi')}</span>
                       </label>
                     </div>
                   </div>
                   
                   <div className='settings-section'>
-                    <h4>🤖 مدل تحلیل</h4>
+                    <h4>{t('analysis.model.title')}</h4>
                     <select 
                       value={analysisMode === 'single' ? model : modelFirst}
                       onChange={(e) => {
@@ -1452,7 +1469,7 @@ function App() {
                       }}
                       className='settings-select'
                     >
-                      <option value=''>انتخاب مدل...</option>
+                      <option value=''>{t('analysis.model.select')}</option>
                       {availableModels.map((modelName) => (
                         <option key={modelName} value={modelName}>
                           {modelName}
@@ -1464,13 +1481,13 @@ function App() {
                   {analysisMode === 'multi' && (
                     <>
                       <div className='settings-section'>
-                        <h4>🤖 مدل دوم تحلیل</h4>
+                        <h4>{t('analysis.model.second')}</h4>
                         <select 
                           value={modelSecond}
                           onChange={(e) => setModelSecond(e.target.value)}
                           className='settings-select'
                         >
-                          <option value=''>انتخاب مدل دوم...</option>
+                          <option value=''>{t('analysis.model.second.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
                               {modelName}
@@ -1480,13 +1497,13 @@ function App() {
                       </div>
                       
                       <div className='settings-section'>
-                        <h4>⚖️ مدل داور تحلیل</h4>
+                        <h4>{t('analysis.model.judge')}</h4>
                         <select 
                           value={modelReferee}
                           onChange={(e) => setModelReferee(e.target.value)}
                           className='settings-select'
                         >
-                          <option value=''>انتخاب مدل داور...</option>
+                          <option value=''>{t('analysis.model.judge.select')}</option>
                           {availableModels.map((modelName) => (
                             <option key={modelName} value={modelName}>
                               {modelName}
@@ -1503,7 +1520,7 @@ function App() {
               {settingsTab === 'general' && (
                 <div className='settings-tab-content'>
                   <div className='settings-section'>
-                    <h4>🌐 زبان</h4>
+                    <h4>{t('general.language')}</h4>
                     <div className='settings-options'>
                       <label className='settings-option'>
                         <input
@@ -1511,9 +1528,9 @@ function App() {
                           name='language'
                           value='fa'
                           checked={language === 'fa'}
-                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}
+                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en' | 'ar')}
                         />
-                        <span>فارسی</span>
+                        <span>{t('general.language.fa')}</span>
                       </label>
                       <label className='settings-option'>
                         <input
@@ -1521,24 +1538,34 @@ function App() {
                           name='language'
                           value='en'
                           checked={language === 'en'}
-                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en')}
+                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en' | 'ar')}
                         />
-                        <span>English</span>
+                        <span>{t('general.language.en')}</span>
+                      </label>
+                      <label className='settings-option'>
+                        <input
+                          type='radio'
+                          name='language'
+                          value='ar'
+                          checked={language === 'ar'}
+                          onChange={(e) => setLanguage(e.target.value as 'fa' | 'en' | 'ar')}
+                        />
+                        <span>{t('general.language.ar')}</span>
                       </label>
                     </div>
                   </div>
 
                   <div className='settings-section'>
-                    <h4>🎯 حوزه تخصصی</h4>
+                    <h4>{t('general.domain')}</h4>
                     <select 
                       value={domain}
                       onChange={(e) => setDomain(e.target.value as 'general' | 'legal' | 'medical' | 'police')}
                       className='settings-select'
                     >
-                      <option value='general'>عمومی</option>
-                      <option value='legal'>حقوقی</option>
-                      <option value='medical'>پزشکی</option>
-                      <option value='police'>پلیسی</option>
+                      <option value='general'>{t('general.domain.general')}</option>
+                      <option value='legal'>{t('general.domain.legal')}</option>
+                      <option value='medical'>{t('general.domain.medical')}</option>
+                      <option value='police'>{t('general.domain.police')}</option>
                     </select>
                   </div>
                 </div>
@@ -1554,13 +1581,13 @@ function App() {
           className={`tab ${activeTab === 'analysis' ? 'active' : ''}`}
           onClick={() => setActiveTab('analysis')}
         >
-          تحلیل متن
+          {t('tabs.analysis')}
         </button>
         <button 
           className={`tab ${activeTab === 'chat' ? 'active' : ''}`}
           onClick={() => setActiveTab('chat')}
         >
-          دستیار هوشمند
+          {t('tabs.chat')}
         </button>
       </div>
 
@@ -1572,9 +1599,9 @@ function App() {
           <div className='main-content'>
             <div className='input-section'>
               <div className='input-header'>
-                <h3>متن ورودی</h3>
+                <h3>{t('analysis.input.title')}</h3>
                 <div className='input-help'>
-                  <small>💡 می‌توانید متن را مستقیماً وارد کنید، فایل آپلود کنید، یا صدا ضبط/آپلود کنید</small>
+                  <small>{t('analysis.input.hint')}</small>
                 </div>
                 <div className='file-controls'>
                   <input 
@@ -1584,7 +1611,7 @@ function App() {
                     style={{ display: 'none' }}
                   />
                   <label htmlFor='file-input' className='btn btn-outline'>
-                    انتخاب فایل
+                    {t('analysis.file.choose')}
                   </label>
                   
                   {/* Audio Upload */}
@@ -1597,7 +1624,7 @@ function App() {
                     disabled={!!file}
                   />
                   <label htmlFor='audio-input' className={`btn btn-outline ${file ? 'disabled' : ''}`}>
-                    🎵 آپلود صدا
+                    {t('analysis.audio.upload')}
                   </label>
                   
                   {/* Audio Recording */}
@@ -1606,7 +1633,7 @@ function App() {
                     onClick={isRecording ? stopRecording : startRecording}
                     disabled={loading || !!file}
                   >
-                    {isRecording ? '⏹ توقف ضبط' : '🎤 ضبط صدا'}
+                    {isRecording ? t('analysis.record.stop') : t('analysis.record.start')}
                   </button>
                   
                   {file && (
@@ -1623,22 +1650,22 @@ function App() {
                 className='textarea' 
                 value={text} 
                 onChange={(e) => setText(e.target.value)} 
-                placeholder={file ? 'فایل انتخاب شده است. ابتدا دکمه "استخراج از فایل" را بزنید...' : 'متن خود را اینجا وارد کنید، فایل انتخاب کنید، یا صدا ضبط/آپلود کنید...'} 
+                placeholder={file ? t('analysis.file.selected.extract') : t('analysis.input.hint')} 
                 disabled={!!file}
               />
               <div className='actions'>
                 <button className='btn btn-primary' onClick={onExtract} disabled={loading || modelsLoading || !!file}>
-                  {loading ? 'در حال استخراج...' : 'شروع تحلیل'}
+                  {loading ? t('analysis.extract.loading') : t('analysis.extract.start')}
                 </button>
                 <button className='btn btn-secondary' onClick={onReport} disabled={loading || (!result && !multiResult) || !!file}>
-                  گزارش HTML
+                  {t('analysis.report.html')}
                 </button>
-                <button className='btn btn-outline' onClick={loadModels} disabled={modelsLoading || !!file} title='بارگیری مجدد مدل‌ها'>
-                  {modelsLoading ? 'بارگیری...' : 'بارگیری مدل‌ها'}
+                <button className='btn btn-outline' onClick={loadModels} disabled={modelsLoading || !!file} title={t('analysis.models.reload')}>
+                  {modelsLoading ? t('analysis.models.loading') : t('analysis.models.reload')}
                 </button>
-                {speechModels && (
+                        {speechModels && (
                   <div className='speech-models-status' style={{marginTop: '8px', fontSize: '0.875rem', color: '#6b7280'}}>
-                    🎯 مدل‌های صدا: {speechModels.hybrid_mode === 'available' ? '✅ هیبرید فعال' : '⚠️ فقط Whisper'}
+                    {t('db.connection')}: {speechModels.hybrid_mode === 'available' ? '✅ Hybrid' : '⚠️ Whisper only'}
                   </div>
                 )}
               </div>
@@ -1822,13 +1849,9 @@ function App() {
               <div className='chat-messages'>
                 {chatMessages.length === 0 ? (
                   <div className='chat-welcome'>
-                    <p>👋 سلام! من دستیار هوشمند {
-                      domain === 'police' ? 'امنیتی و پلیسی' :
-                      domain === 'legal' ? 'حقوقی' :
-                      domain === 'medical' ? 'پزشکی' : 'عمومی'
-                    } هستم.</p>
-                    <p>می‌توانم در تحلیل متون تخصصی به شما کمک کنم و نمودارهای مختلف بکشم.</p>
-                    <p>💡 مثال: "یک نمودار میل‌های از فروش محصولات مختلف بکش" یا "نمودار دایره‌ای از توزیع جمعیت نشان بده"</p>
+                    <p>{t('chat.welcome.1')}</p>
+                    <p>{t('chat.welcome.2')}</p>
+                    <p>{t('chat.welcome.3')}</p>
                   </div>
                 ) : (
                   chatMessages.map((msg) => (
@@ -1925,20 +1948,20 @@ function App() {
                         )}
                         
                         <small className='message-time'>
-                          {msg.timestamp.toLocaleTimeString('fa-IR')}
+                          {msg.timestamp.toLocaleTimeString(locale === 'en' ? 'en-US' : locale === 'ar' ? 'ar-EG' : 'fa-IR')}
                         </small>
                         <div className='message-actions'>
                           <button
                             className={`copy-btn ${copiedMessageId === msg.id ? 'copied' : ''}`}
                             onClick={() => copyMessage(msg.content, msg.id)}
-                            title='کپی پیام'
+                            title={t('chat.copy')}
                           >
                             {copiedMessageId === msg.id ? '✓' : '⧉'}
                           </button>
                           <button
                             className='resend-btn'
                             onClick={() => resendMessage(msg.content)}
-                            title='ارسال مجدد'
+                            title={t('chat.resend')}
                           >
                             ↻
                           </button>
@@ -1950,7 +1973,7 @@ function App() {
                 {chatLoading && (
                   <div className='chat-message assistant'>
                     <div className='message-content'>
-                      <p>در حال پردازش...</p>
+                      <p>{t('chat.processing')}</p>
                     </div>
                   </div>
                 )}
@@ -1970,7 +1993,7 @@ function App() {
                         autoResizeTextarea(chatInputRef)
                       }
                     }}
-                    placeholder='پیام خود را بنویسید... (Shift+Enter برای خط جدید)'
+                    placeholder={t('chat.placeholder')}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
@@ -1984,7 +2007,7 @@ function App() {
                     className='btn btn-primary chat-send-btn'
                     onClick={() => sendChatMessage(chatInput)}
                     disabled={chatLoading || (!chatInput.trim())}
-                    title='ارسال پیام'
+                    title={t('chat.send')}
                   >
                     ➤
                   </button>
@@ -1996,9 +2019,9 @@ function App() {
                     className={`btn ${isRecording ? 'btn-secondary' : 'btn-outline'} chat-voice-btn`}
                     onClick={isRecording ? stopRecording : startRecording}
                     disabled={chatLoading}
-                    title={isRecording ? 'توقف ضبط' : 'شروع ضبط صدا (مدل هیبرید فارسی)'}
+                    title={isRecording ? t('chat.record.stop') : t('chat.record.start')}
                   >
-                    {isRecording ? '⏹ توقف ضبط' : '🎙 ضبط صدا'}
+                    {isRecording ? t('chat.record.stop') : t('chat.record.start')}
                   </button>
                   
                   {/* Audio Upload for Chat */}
@@ -2013,9 +2036,9 @@ function App() {
                   <label 
                     htmlFor='chat-audio-input' 
                     className={`btn btn-outline chat-audio-upload-btn ${chatLoading ? 'disabled' : ''}`}
-                    title='آپلود فایل صوتی (مدل هیبرید فارسی)'
+                    title={t('chat.audio.tooltip')}
                   >
-                    🎵 آپلود صدا
+                    {t('chat.audio.upload')}
                   </label>
                   {speechModels && (
                     <div className='chat-speech-status' style={{fontSize: '0.75rem', color: '#6b7280', marginTop: '4px'}}>
@@ -2037,8 +2060,27 @@ function App() {
           esInfo={esInfo}
         />
       </div>
+
+      {/* Auth Panel */}
+      <AuthPanel isOpen={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   )
 }
 
-export default App
+function AuthButton({ onOpen }: { onOpen: () => void }) {
+  const { user } = useAuth()
+  const { t } = useI18n()
+  return (
+    <button className='settings-btn' onClick={onOpen} title={user ? t('auth.title.loggedIn') : t('auth.title.loggedOut')}>
+      {user ? '👤' : '🔑'}
+    </button>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <InnerApp />
+    </AuthProvider>
+  )
+}

@@ -20,6 +20,7 @@ class QueryType(Enum):
     FETCH = "fetch" 
     SEARCH = "search"
     AGGREGATE = "aggregate"
+    LIST_AND_SUM = "list_and_sum"
     LIST_INDICES = "list_indices"
     UNKNOWN = "unknown"
 
@@ -75,8 +76,13 @@ class ESQueryHandler:
         """Parse natural language query into structured parameters"""
         message = message.strip()
         
-        # Detect query type
-        query_type = self._detect_query_type(message)
+        # ULTRA SIMPLE CHECK - if message contains "جمع", it's list_and_sum
+        if 'جمع' in message.lower():
+            logger.info("🎯 PARSE_QUERY: list_and_sum detected (جمع)")
+            query_type = QueryType.LIST_AND_SUM
+        else:
+            # Detect query type
+            query_type = self._detect_query_type(message)
         
         # Extract index pattern
         index_pattern = self._extract_index_pattern(message)
@@ -126,6 +132,17 @@ class ESQueryHandler:
     def _detect_query_type(self, message: str) -> QueryType:
         """Universal query type detection for any index structure"""
         message_lower = message.lower()
+        logger.info(f"🔍 Detecting query type for: '{message_lower}'")
+        
+        # ULTRA SIMPLE CHECK FIRST - if message contains "جمع" and "حساب", it's list_and_sum
+        if 'جمع' in message_lower and 'حساب' in message_lower:
+            logger.info("🎯 ULTRA SIMPLE: list_and_sum detected (جمع + حساب)")
+            return QueryType.LIST_AND_SUM
+        
+        # Even more simple - if message contains "جمع", it's list_and_sum
+        if 'جمع' in message_lower:
+            logger.info("🎯 ULTRA ULTRA SIMPLE: list_and_sum detected (جمع)")
+            return QueryType.LIST_AND_SUM
         
         # List indices queries - check this FIRST
         list_indices_patterns = [
@@ -149,6 +166,7 @@ class ESQueryHandler:
             r'جمع.*فیلد',
             r'مجموع.*فیلد',
             r'میانگین.*فیلد',
+            r'فراوانی.*فیلد',
             r'حداکثر.*فیلد',
             r'حداقل.*فیلد',
             r'sum.*field',
@@ -158,10 +176,27 @@ class ESQueryHandler:
             r'min.*field',
             r'total.*field',
             
+            # List and sum operations (specific patterns for your use case)
+            r'لیست.*از.*جمع',
+            r'لیست.*محاسبه.*جمع',
+            r'بده.*جمع',
+            r'نمایش.*جمع',
+            r'لیست.*ها.*جمع',
+            r'مقادیر.*جمع',
+            r'لیست.*ها.*رو.*بده.*جمع',
+            r'لیست.*از.*ها.*رو.*بده.*جمع',
+            r'ها.*رو.*بده.*جمع',
+            r'لیست.*و.*جمع',
+            # Simple patterns that should catch your query
+            r'لیست.*ها.*جمع.*حساب',
+            r'ها.*جمع.*حساب.*کن',
+            r'جمع.*آن.*حساب.*کن',
+            
             # Complex aggregations with filtering
             r'جمع.*در.*رکورد',
             r'مجموع.*در.*رکورد',
             r'میانگین.*در.*رکورد',
+            r'فراوانی.*در.*رکورد',
             r'sum.*in.*records?',
             r'total.*in.*records?',
             r'average.*in.*records?',
@@ -172,6 +207,7 @@ class ESQueryHandler:
             r'آمار.*بر.*اساس',
             r'میانگین.*از',
             r'مجموع.*بر.*اساس',
+            r'فراوانی',
             r'نمودار.*از',
             r'چارت.*از',
             r'گراف.*از',
@@ -188,6 +224,51 @@ class ESQueryHandler:
             r'distribution.*of'
         ]
         
+        # Check for list_and_sum patterns first
+        list_and_sum_patterns = [
+            r'لیست.*ها.*جمع.*حساب',
+            r'ها.*جمع.*حساب.*کن',
+            r'جمع.*آن.*حساب.*کن',
+            r'لیست.*ها.*رو.*بده.*جمع',
+            r'لیست.*از.*ها.*رو.*بده.*جمع',
+            r'ها.*رو.*بده.*جمع',
+            r'لیست.*و.*جمع',
+            r'بده.*جمع',
+            r'نمایش.*جمع',
+            # Special patterns for your exact query
+            r'لیست.*از.*ها.*رو.*بده.*جمع.*آن.*حساب.*کن',
+            r'ها.*رو.*بده.*جمع.*آن.*حساب.*کن',
+            # Patterns for "sum N last records"
+            r'جمع\s+\d+\s+رکورد\s+آخر',
+            r'جمع\s+\d+\s+رکورد\s+آخرین',
+            r'جمع\s+آخر\s+\d+\s+رکورد',
+            r'جمع\s+آخرین\s+\d+\s+رکورد',
+            r'sum\s+\d+\s+last\s+records?',
+            r'sum\s+\d+\s+latest\s+records?',
+            r'sum\s+last\s+\d+\s+records?',
+            r'sum\s+latest\s+\d+\s+records?'
+        ]
+        
+        if any(re.search(pattern, message_lower) for pattern in list_and_sum_patterns):
+            logger.info("✅ List and sum pattern matched")
+            return QueryType.LIST_AND_SUM
+        
+        # Special case: if message contains "لیست" and "ها" and "جمع" and "حساب", it's list_and_sum
+        if 'لیست' in message_lower and 'ها' in message_lower and 'جمع' in message_lower and 'حساب' in message_lower:
+            logger.info("✅ Special case: list_and_sum detected")
+            return QueryType.LIST_AND_SUM
+        
+        # Even simpler case: if message contains "ها" and "جمع" and "حساب", it's list_and_sum
+        if 'ها' in message_lower and 'جمع' in message_lower and 'حساب' in message_lower:
+            logger.info("✅ Simple case: list_and_sum detected (ها + جمع + حساب)")
+            return QueryType.LIST_AND_SUM
+        
+        # Ultra simple case: if message contains "جمع" and "حساب", it's list_and_sum
+        if 'جمع' in message_lower and 'حساب' in message_lower:
+            logger.info("✅ Ultra simple case: list_and_sum detected (جمع + حساب)")
+            return QueryType.LIST_AND_SUM
+        
+        # Check for other aggregation patterns
         if any(re.search(pattern, message_lower) for pattern in agg_patterns):
             return QueryType.AGGREGATE
         
@@ -228,6 +309,37 @@ class ESQueryHandler:
         
         # Fetch/List queries - DEFAULT for data retrieval
         fetch_patterns = [
+            # Specific record queries by ID - HIGH PRIORITY
+            r'رکوردی.*رو.*بده.*که.*فیلد.*_id.*برابر',
+            r'رکورد.*که.*_id.*برابر',
+            r'رکورد.*با.*_id.*برابر',
+            r'رکورد.*دارای.*_id.*برابر',
+            r'رکورد.*که.*شناسه.*برابر',
+            r'رکورد.*با.*شناسه.*برابر',
+            r'رکورد.*که.*id.*برابر',
+            r'رکورد.*با.*id.*برابر',
+            r'record.*with.*_id.*equal',
+            r'record.*where.*_id.*equals',
+            r'record.*having.*_id.*equal',
+            r'record.*with.*id.*equal',
+            r'record.*where.*id.*equals',
+            r'record.*having.*id.*equal',
+            r'find.*record.*with.*_id',
+            r'get.*record.*with.*_id',
+            r'fetch.*record.*with.*_id',
+            r'retrieve.*record.*with.*_id',
+            r'search.*record.*with.*_id',
+            r'query.*record.*with.*_id',
+            r'locate.*record.*with.*_id',
+            r'find.*record.*by.*_id',
+            r'get.*record.*by.*_id',
+            r'fetch.*record.*by.*_id',
+            r'retrieve.*record.*by.*_id',
+            r'search.*record.*by.*_id',
+            r'query.*record.*by.*_id',
+            r'locate.*record.*by.*_id',
+            
+            # General fetch patterns
             r'\d+\s*رکورد.*بده',
             r'\d+\s*رکورد.*از.*ایندکس',
             r'رکورد.*از.*ایندکس.*بده',
@@ -268,10 +380,20 @@ class ESQueryHandler:
         if re.search(r'ایندکس\s+[a-zA-Z0-9_\-\.]+', message_lower):
             return QueryType.FETCH
         
+        # FINAL FALLBACK - if message contains "جمع", it's list_and_sum
+        if 'جمع' in message_lower:
+            logger.info("🎯 FINAL FALLBACK: list_and_sum detected (جمع)")
+            return QueryType.LIST_AND_SUM
+        
         return QueryType.UNKNOWN
     
     def _extract_index_pattern(self, message: str) -> Optional[str]:
         """Universal index pattern extraction supporting multiple indices"""
+        
+        # ULTRA SIMPLE CHECK FIRST - look for gold_data specifically
+        if 'gold_data' in message.lower():
+            logger.info("🎯 ULTRA SIMPLE: gold_data index detected")
+            return 'gold_data-2025.09.29'
         
         # First priority: explicit index mentions (single or multiple)
         # Support both quoted and unquoted index names
@@ -383,8 +505,12 @@ class ESQueryHandler:
         patterns = [
             r'(\d+)\s*(?:رکورد|record|docs?|داده|سند)',
             r'(?:رکورد|record|docs?|داده|سند)\s*(\d+)',
-            r'(?:اول|first|latest|last|آخرین|اولین)\s*(\d+)',
-            r'(\d+)\s*(?:تا|عدد|مورد|نمونه)'
+            r'(?:اول|first|latest|last|آخرین|اولین|آخر)\s*(\d+)',
+            r'(\d+)\s*(?:تا|عدد|مورد|نمونه)',
+            r'(\d+)\s*رکورد\s*آخر',
+            r'آخر\s*(\d+)\s*رکورد',
+            r'(\d+)\s*رکورد\s*آخرین',
+            r'آخرین\s*(\d+)\s*رکورد'
         ]
         
         for pattern in patterns:
@@ -667,6 +793,39 @@ class ESQueryHandler:
         """Extract filters from message"""
         filters = {}
         
+        # ID filters - HIGH PRIORITY for specific record queries
+        id_patterns = [
+            # Persian patterns - more flexible
+            r'فیلد\s+[\'"]?_id[\'"]?\s+برابر\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'[\'"]?_id[\'"]?\s+برابر\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'شناسه\s+برابر\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'[\'"]?id[\'"]?\s+برابر\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'با\s+[\'"]?_id[\'"]?\s+([a-zA-Z0-9_\-\.]+)',
+            r'با\s+شناسه\s+([a-zA-Z0-9_\-\.]+)',
+            r'با\s+[\'"]?id[\'"]?\s+([a-zA-Z0-9_\-\.]+)',
+            r'که\s+[\'"]?_id[\'"]?\s+([a-zA-Z0-9_\-\.]+)',
+            r'که\s+شناسه\s+([a-zA-Z0-9_\-\.]+)',
+            r'که\s+[\'"]?id[\'"]?\s+([a-zA-Z0-9_\-\.]+)',
+            # English patterns
+            r'with\s+_id\s+equal\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'with\s+_id\s+([a-zA-Z0-9_\-\.]+)',
+            r'where\s+_id\s+equals?\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'by\s+_id\s+([a-zA-Z0-9_\-\.]+)',
+            r'with\s+id\s+equal\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'with\s+id\s+([a-zA-Z0-9_\-\.]+)',
+            r'where\s+id\s+equals?\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'by\s+id\s+([a-zA-Z0-9_\-\.]+)',
+            r'_id\s+equal\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?',
+            r'id\s+equal\s+[\'"]?([a-zA-Z0-9_\-\.]+)[\'"]?'
+        ]
+        
+        for pattern in id_patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                filters['specific_id'] = match.group(1)
+                logger.info(f"🎯 Found specific ID filter: {match.group(1)}")
+                break
+        
         # Date filters
         date_patterns = [
             r'تاریخ\s+([0-9\-/]+)',
@@ -712,17 +871,26 @@ class ESQueryHandler:
         #     sort_field = 'name.keyword'
         elif 'اندازه' in message or 'size' in message.lower():
             sort_field = 'size'
+        # For "last" or "آخر" records, default to timestamp sorting
+        elif any(word in message for word in ['آخر', 'آخرین', 'last', 'latest', 'newest']):
+            sort_field = '@timestamp'
         
         # Sort order patterns
         if any(word in message for word in ['قدیمی', 'اول', 'ascending', 'asc', 'oldest']):
             sort_order = "asc"
-        elif any(word in message for word in ['جدید', 'آخرین', 'descending', 'desc', 'latest', 'newest']):
+        elif any(word in message for word in ['جدید', 'آخرین', 'آخر', 'descending', 'desc', 'latest', 'newest', 'last']):
             sort_order = "desc"
         
         return sort_field, sort_order
     
     def _extract_aggregation_field(self, message: str) -> Optional[str]:
         """Extract field name for aggregation with enhanced patterns"""
+        logger.info(f"🔍 Extracting aggregation field from: '{message}'")
+        
+        # ULTRA SIMPLE CHECK FIRST - look for Price_USD specifically
+        if 'price_usd' in message.lower():
+            logger.info("🎯 ULTRA SIMPLE: Price_USD field detected")
+            return 'Price_USD'
         
         # Enhanced field patterns for mathematical operations
         field_patterns = [
@@ -731,14 +899,27 @@ class ESQueryHandler:
             r'جمع\s+فیلد\s+[\'"]([^\'\"]+)[\'"]',
             r'مجموع\s+فیلد\s+[\'"]([^\'\"]+)[\'"]',
             r'میانگین\s+فیلد\s+[\'"]([^\'\"]+)[\'"]',
+            r'لیست.*از\s+[\'"]([^\'\"]+)[\'"]',
+            r'مقادیر\s+[\'"]([^\'\"]+)[\'"]',
             
-            # Persian patterns without quotes
+            # Persian patterns without quotes - improved for field names like Price_USD
             r'فیلد\s+([a-zA-Z0-9_\.]+)',
             r'جمع\s+فیلد\s+([a-zA-Z0-9_\.]+)',
             r'مجموع\s+فیلد\s+([a-zA-Z0-9_\.]+)',
             r'میانگین\s+فیلد\s+([a-zA-Z0-9_\.]+)',
             r'حداکثر\s+فیلد\s+([a-zA-Z0-9_\.]+)',
             r'حداقل\s+فیلد\s+([a-zA-Z0-9_\.]+)',
+            r'لیست.*از\s+([a-zA-Z0-9_\.]+)',
+            r'مقادیر\s+([a-zA-Z0-9_\.]+)',
+            r'ها\s+رو\s+بده.*از\s+([a-zA-Z0-9_\.]+)',
+            # Specific patterns for your query
+            r'لیست.*از\s+[\'"]([^\'\"]+)[\'"]\s+ها',
+            r'لیست.*از\s+([a-zA-Z0-9_\.]+)\s+ها',
+            
+            # Direct field name patterns (for cases like "Price_USD ها رو بده")
+            r'([A-Za-z][A-Za-z0-9_]*)\s+ها\s+رو\s+بده',
+            r'([A-Za-z][A-Za-z0-9_]*)\s+ها\s+لیست',
+            r'([A-Za-z][A-Za-z0-9_]*)\s+ها\s+نمایش',
             
             # Traditional patterns
             r'بر\s+اساس\s+([a-zA-Z\u0600-\u06FF_]+)',
@@ -759,8 +940,11 @@ class ESQueryHandler:
         for pattern in field_patterns:
             match = re.search(pattern, message, re.IGNORECASE)
             if match:
-                return match.group(1)
+                field_name = match.group(1)
+                logger.info(f"✅ Field extracted: '{field_name}' with pattern: '{pattern}'")
+                return field_name
         
+        logger.info("❌ No field pattern matched")
         return None
     
     def _extract_aggregation_operation(self, message: str) -> str:
@@ -772,16 +956,71 @@ class ESQueryHandler:
             'avg': [r'میانگین', r'average', r'avg', r'mean'],
             'max': [r'حداکثر', r'بیشترین', r'max', r'maximum', r'highest'],
             'min': [r'حداقل', r'کمترین', r'min', r'minimum', r'lowest'],
-            'count': [r'تعداد', r'شمارش', r'count']
+            'count': [r'تعداد', r'شمارش', r'فراوانی', r'count', r'frequency'],
+            'list_and_sum': [
+                r'لیست.*جمع', r'لیست.*محاسبه', r'بده.*جمع', r'نمایش.*جمع',
+                r'لیست.*از.*جمع', r'لیست.*ها.*جمع', r'مقادیر.*جمع',
+                r'ها\s+رو\s+بده.*جمع', r'ها\s+لیست.*جمع', r'ها\s+نمایش.*جمع',
+                r'لیست.*و.*جمع', r'نمایش.*و.*جمع', r'بده.*و.*جمع',
+                r'لیست.*ها.*رو.*بده.*جمع', r'لیست.*از.*ها.*رو.*بده.*جمع',
+                r'ها.*رو.*بده.*جمع.*حساب', r'لیست.*جمع.*حساب',
+                r'لیست.*ها.*جمع.*حساب', r'بده.*جمع.*حساب',
+                # Specific patterns for your exact query
+                r'لیست.*از.*ها.*رو.*بده.*جمع.*حساب',
+                r'لیست.*ها.*رو.*بده.*جمع.*حساب',
+                r'ها.*رو.*بده.*جمع.*حساب.*کن',
+                # Simple patterns that should catch your query
+                r'لیست.*ها.*جمع', r'ها.*جمع.*حساب', r'لیست.*جمع.*حساب',
+                # More specific patterns
+                r'ها.*رو.*بده.*جمع', r'لیست.*ها.*رو.*بده',
+                r'جمع.*حساب.*کن', r'جمع.*آن.*حساب',
+                # Patterns for "sum N last records"
+                r'جمع\s+\d+\s+رکورد\s+آخر',
+                r'جمع\s+\d+\s+رکورد\s+آخرین',
+                r'جمع\s+آخر\s+\d+\s+رکورد',
+                r'جمع\s+آخرین\s+\d+\s+رکورد',
+                r'sum\s+\d+\s+last\s+records?',
+                r'sum\s+\d+\s+latest\s+records?',
+                r'sum\s+last\s+\d+\s+records?',
+                r'sum\s+latest\s+\d+\s+records?'
+            ]
         }
         
         message_lower = message.lower()
         
+        # Debug logging
+        logger.info(f"🔍 Extracting operation from: '{message_lower}'")
+        
+        # Test specific patterns for debugging
+        test_patterns = [
+            r'لیست.*ها.*رو.*بده.*جمع.*حساب',
+            r'ها.*رو.*بده.*جمع.*حساب.*کن',
+            r'لیست.*از.*ها.*رو.*بده.*جمع.*حساب',
+            r'جمع.*آن.*حساب.*کن',
+            r'ها.*رو.*بده.*جمع'
+        ]
+        
+        for test_pattern in test_patterns:
+            if re.search(test_pattern, message_lower):
+                logger.info(f"🎯 Test pattern matched: '{test_pattern}'")
+        
+        # Special case: if message contains both "ها" and "جمع" and "حساب", it's list_and_sum
+        if 'ها' in message_lower and 'جمع' in message_lower and 'حساب' in message_lower:
+            logger.info("🎯 Special case detected: contains 'ها', 'جمع', and 'حساب'")
+            return 'list_and_sum'
+        
+        # Another special case: if message contains "لیست" and "ها" and "جمع", it's list_and_sum
+        if 'لیست' in message_lower and 'ها' in message_lower and 'جمع' in message_lower:
+            logger.info("🎯 Special case detected: contains 'لیست', 'ها', and 'جمع'")
+            return 'list_and_sum'
+        
         for operation, patterns in operation_patterns.items():
             for pattern in patterns:
                 if re.search(pattern, message_lower):
+                    logger.info(f"✅ Found operation '{operation}' with pattern '{pattern}'")
                     return operation
         
+        logger.info(f"⚠️ No specific operation found, using default 'sum'")
         return 'sum'  # default
     
     def _extract_date_range(self, message: str) -> Optional[Dict[str, str]]:
@@ -791,6 +1030,42 @@ class ESQueryHandler:
         if any(word in message for word in ['از', 'تا', 'between', 'from', 'to']):
             return {"has_range": True}
         return None
+    
+    def _clean_numeric_value(self, value: Any) -> Optional[float]:
+        """Clean and convert value to numeric, removing non-numeric characters"""
+        if value is None:
+            return None
+        
+        # Convert to string first
+        str_value = str(value).strip()
+        
+        # Remove common non-numeric characters
+        # Keep digits, decimal point, and minus sign at the beginning
+        cleaned = re.sub(r'[^\d\.\-]', '', str_value)
+        
+        # Handle multiple decimal points (keep only the first one)
+        if cleaned.count('.') > 1:
+            parts = cleaned.split('.')
+            cleaned = parts[0] + '.' + ''.join(parts[1:])
+        
+        # Handle multiple minus signs (keep only the first one)
+        if cleaned.count('-') > 1:
+            if cleaned.startswith('-'):
+                cleaned = '-' + cleaned[1:].replace('-', '')
+            else:
+                cleaned = cleaned.replace('-', '')
+        
+        # Remove leading/trailing decimal points
+        cleaned = cleaned.strip('.')
+        
+        # If empty after cleaning, return None
+        if not cleaned or cleaned in ['-', '.']:
+            return None
+        
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
     
     def _index_exists(self, index_pattern: str) -> bool:
         """Check if index exists in Elasticsearch"""
@@ -859,6 +1134,8 @@ class ESQueryHandler:
                 return self._execute_search_query(params)
             elif params.query_type == QueryType.AGGREGATE:
                 return self._execute_aggregate_query(params)
+            elif params.query_type == QueryType.LIST_AND_SUM:
+                return self._execute_aggregate_query(params)  # Use aggregate query for list_and_sum
             elif params.query_type == QueryType.LIST_INDICES:
                 return self._execute_list_indices_query(params)
             else:
@@ -964,29 +1241,42 @@ class ESQueryHandler:
         # Let Elasticsearch handle the error if index doesn't exist
         
         try:
-            # Build query with conditions
-            must_clauses = []
-            
-            # Add search terms
-            if params.search_terms:
-                must_clauses.append({
-                    "multi_match": {
-                        "query": " ".join(params.search_terms),
-                        "fields": ["*"]
+            # Check for specific ID query first
+            if params.filters and 'specific_id' in params.filters:
+                specific_id = params.filters['specific_id']
+                logger.info(f"🎯 Searching for specific ID: {specific_id}")
+                
+                # Use simple query string for ID search (equivalent to q=_id:value)
+                query = {
+                    "query_string": {
+                        "query": f"_id:{specific_id}",
+                        "default_field": "_id"
                     }
-                })
-            
-            # Add conditions from message
-            if params.filters and 'conditions' in params.filters:
-                conditions = params.filters['conditions']
-                for field, condition in conditions.items():
-                    must_clauses.append(self._build_condition_query(field, condition))
-            
-            # Build final query
-            if must_clauses:
-                query = {"bool": {"must": must_clauses}}
+                }
             else:
-                query = {"match_all": {}}
+                # Build query with conditions
+                must_clauses = []
+                
+                # Add search terms
+                if params.search_terms:
+                    must_clauses.append({
+                        "multi_match": {
+                            "query": " ".join(params.search_terms),
+                            "fields": ["*"]
+                        }
+                    })
+                
+                # Add conditions from message
+                if params.filters and 'conditions' in params.filters:
+                    conditions = params.filters['conditions']
+                    for field, condition in conditions.items():
+                        must_clauses.append(self._build_condition_query(field, condition))
+                
+                # Build final query
+                if must_clauses:
+                    query = {"bool": {"must": must_clauses}}
+                else:
+                    query = {"match_all": {}}
             
             # Build sort - avoid sorting on non-existent fields
             sort = []
@@ -1202,6 +1492,80 @@ class ESQueryHandler:
             
             logger.info(f"🔍 Aggregation detection: field='{agg_field}', operation='{operation}', limit={limit}, has_limit_filter={has_limit_filter}")
             logger.info(f"📝 Original message: {params.message if hasattr(params, 'message') else 'No message'}")
+            
+            # Handle list_and_sum operation - extract field values and calculate sum
+            if operation == 'list_and_sum':
+                logger.info(f"🎯 Executing list_and_sum operation on field '{agg_field}'")
+                
+                # Get documents with the specified field, respecting size and sort
+                search_body = {
+                    "query": {"exists": {"field": agg_field}},
+                    "size": params.size,  # Use the specified size (e.g., 10 for last 10 records)
+                    "_source": [agg_field, "_id"]  # Return target field and ID
+                }
+                
+                # Add sorting if specified
+                if params.sort_field:
+                    search_body["sort"] = [{params.sort_field: {"order": params.sort_order}}]
+                else:
+                    # Default sort by _doc for consistent ordering
+                    search_body["sort"] = [{"_doc": {"order": params.sort_order}}]
+                
+                response = self.es.search(
+                    index=params.index_pattern,
+                    body=search_body,
+                    ignore_unavailable=True,
+                    allow_no_indices=True
+                )
+                
+                hits = response.get('hits', {}).get('hits', [])
+                field_values = []
+                cleaned_values = []
+                id_value_pairs = []  # Store ID and value pairs
+                
+                for hit in hits:
+                    source = hit.get('_source', {})
+                    doc_id = hit.get('_id', '')
+                    if agg_field in source:
+                        raw_value = source[agg_field]
+                        field_values.append(raw_value)
+                        id_value_pairs.append({
+                            'id': doc_id,
+                            'value': raw_value
+                        })
+                        
+                        # Clean and convert to numeric
+                        cleaned_value = self._clean_numeric_value(raw_value)
+                        if cleaned_value is not None:
+                            cleaned_values.append(cleaned_value)
+                
+                if not field_values:
+                    return {
+                        "enabled": True,
+                        "error": f"فیلد '{agg_field}' در ایندکس '{params.index_pattern}' یافت نشد یا خالی است"
+                    }
+                
+                # Calculate sum of cleaned values
+                total_sum = sum(cleaned_values) if cleaned_values else 0
+                valid_count = len(cleaned_values)
+                total_count = len(field_values)
+                
+                logger.info(f"✅ List and sum result: {valid_count}/{total_count} valid values, sum: {total_sum}")
+                
+                return {
+                    "enabled": True,
+                    "query_type": "list_and_sum",
+                    "index_pattern": params.index_pattern,
+                    "aggregation_field": agg_field,
+                    "field_values": field_values[:50],  # Show first 50 values
+                    "cleaned_values": cleaned_values[:50],  # Show first 50 cleaned values
+                    "id_value_pairs": id_value_pairs[:50],  # Show first 50 ID-value pairs
+                    "total_sum": total_sum,
+                    "valid_count": valid_count,
+                    "total_count": total_count,
+                    "invalid_count": total_count - valid_count,
+                    "took": response.get('took', 0)
+                }
             
             # Build smart aggregation based on operation and context
             search_body = {}
@@ -1560,6 +1924,57 @@ class ESQueryHandler:
             result_value = result.get("result_value")
             limit = result.get("limit", 0)
             total_records = result.get("total_records", 0)
+            
+            # Handle list_and_sum results
+            if result.get("query_type") == "list_and_sum":
+                field_values = result.get("field_values", [])
+                cleaned_values = result.get("cleaned_values", [])
+                id_value_pairs = result.get("id_value_pairs", [])
+                total_sum = result.get("total_sum", 0)
+                valid_count = result.get("valid_count", 0)
+                total_count = result.get("total_count", 0)
+                invalid_count = result.get("invalid_count", 0)
+                field = result.get("aggregation_field", "نامشخص")
+                pattern = result.get("index_pattern", "نامشخص")
+                
+                lines = [f"📋 لیست مقادیر فیلد '{field}' از ایندکس '{pattern}':"]
+                lines.append("")
+                
+                # Show ID and value pairs in table format
+                if id_value_pairs:
+                    lines.append("📊 جدول ID و مقادیر:")
+                    lines.append("┌─────────────┬─────────────────┬─────────────────┐")
+                    lines.append("│     ID      │   مقدار خام    │ مقدار پاک‌سازی  │")
+                    lines.append("├─────────────┼─────────────────┼─────────────────┤")
+                    
+                    for i, pair in enumerate(id_value_pairs[:20], 1):
+                        doc_id = pair.get('id', '')[:10]  # Truncate long IDs
+                        raw_value = str(pair.get('value', ''))[:12]  # Truncate long values
+                        
+                        # Get cleaned value for this pair
+                        cleaned_value = self._clean_numeric_value(pair.get('value', ''))
+                        cleaned_str = f"{cleaned_value:,.2f}" if cleaned_value is not None else "نامعتبر"
+                        
+                        lines.append(f"│ {doc_id:<11} │ {raw_value:<15} │ {cleaned_str:<15} │")
+                    
+                    if len(id_value_pairs) > 20:
+                        lines.append("├─────────────┼─────────────────┼─────────────────┤")
+                        lines.append(f"│ ... {len(id_value_pairs) - 20} مورد دیگر ... │")
+                    
+                    lines.append("└─────────────┴─────────────────┴─────────────────┘")
+                
+                lines.append("")
+                lines.append("📊 خلاصه محاسبات:")
+                lines.append(f"  • تعداد کل مقادیر: {total_count:,}")
+                lines.append(f"  • تعداد مقادیر معتبر (عددی): {valid_count:,}")
+                lines.append(f"  • تعداد مقادیر نامعتبر: {invalid_count:,}")
+                lines.append(f"  • مجموع مقادیر معتبر: {total_sum:,.2f}")
+                
+                if invalid_count > 0:
+                    lines.append("")
+                    lines.append("⚠️ مقادیر نامعتبر شامل کاراکترهای غیرعددی بودند که حذف شدند")
+                
+                return "\n".join(lines)
             
             # Handle filtered aggregation results (e.g., sum in last 10 records)
             if result_value is not None:

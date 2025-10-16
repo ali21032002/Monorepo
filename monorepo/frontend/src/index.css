@@ -93,6 +93,11 @@ html, body, #root {
   height: 100%;
 }
 
+/* Ensure base direction follows html[dir] set by i18n */
+body {
+  direction: inherit;
+}
+
 body {
   background:
     radial-gradient(1200px 600px at 100% -10%, rgba(34, 211, 238, 0.25), transparent 60%),
