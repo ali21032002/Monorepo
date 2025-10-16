@@ -62,7 +62,7 @@ class MultiModelRequest(BaseModel):
 	
 	text: str
 	language: Optional[str] = Field(default="fa", description="fa or en")
-	domain: Optional[str] = Field(default="general", description="Domain: general, legal, medical, police")
+	domain: Optional[str] = Field(default="general", description="Domain: general, medical")
 	
 	# Model selections
 	model_first: str = Field(..., description="First analysis model")
@@ -110,7 +110,7 @@ class ChatRequest(BaseModel):
 	
 	message: str
 	language: Optional[str] = Field(default="fa", description="fa or en")
-	domain: Optional[str] = Field(default="general", description="Domain: general, legal, medical, police")
+	domain: Optional[str] = Field(default="general", description="Domain: general, medical")
 	model: Optional[str] = None
 	analysisMode: Optional[str] = Field(default="single", description="single or multi")
 	model_first: Optional[str] = None

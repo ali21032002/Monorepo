@@ -6,7 +6,7 @@ type Translations = Record<string, Record<Locale, string>>
 
 const translations: Translations = {
   // App
-  'app.title': { fa: 'مرکز مدیریت و تحلیل داده فراجا', en: 'FARAJA Data Analysis Center', ar: 'مركز تحليل بيانات فراجا' },
+  'app.title': { fa: 'دستیار هوش مصنوعی Mentora', en: 'Mentora AI Assistant', ar: 'مساعد الذكاء الاصطناعي Mentora' },
   'app.subtitle': { fa: 'سیستم هوشمند تحلیل متن با قابلیت داوری توسط چند مدل مختلف', en: 'Intelligent text analysis with multi-model adjudication', ar: 'تحليل نص ذكي مع تحكيم متعدد النماذج' },
 
   // Settings
@@ -45,9 +45,9 @@ const translations: Translations = {
   'chat.model.second.select': { fa: 'انتخاب مدل دوم...', en: 'Select second model...', ar: 'اختر النموذج الثاني...' },
   'chat.model.judge': { fa: '⚖️ مدل داور چت', en: '⚖️ Chat judge model', ar: '⚖️ نموذج حكم الدردشة' },
   'chat.model.judge.select': { fa: 'انتخاب مدل داور...', en: 'Select judge model...', ar: 'اختر نموذج الحكم...' },
-  'chat.welcome.1': { fa: '👋 سلام! من خبیر هستم دستیار هوشمند پلیس ایران.', en: '👋 Hello! I am Khabir, the smart assistant of Iranian Police.', ar: '👋 مرحبا! أنا خبير، المساعد الذكي لشرطة إيران.' },
+  'chat.welcome.1': { fa: '👋 سلام! من Mentora هستم دستیار هوش مصنوعی.', en: '👋 Hello! I am Mentora, the AI assistant.', ar: '👋 مرحبا! أنا Mentora، مساعد الذكاء الاصطناعي.' },
   'chat.welcome.2': { fa: 'می‌توانم در تحلیل متون تخصصی به شما کمک کنم و نمودارهای مختلف بکشم.', en: 'I can help analyze specialized texts and draw various charts.', ar: 'أستطيع المساعدة في تحليل النصوص المتخصصة ورسم مخططات مختلفة.' },
-  'chat.welcome.3': { fa: '💡 مثال: "یک نمودار میله‌ای از فروش محصولات مختلف بکش" یا "نمودار دایره‌ای از توزیع جمعیت نشان بده"', en: '💡 Example: "Draw a bar chart of product sales" or "Show a pie chart of population distribution"', ar: '💡 مثال: "ارسم مخططًا شريطيًا لمبيعات المنتجات" أو "اعرض مخططًا دائريًا لتوزيع السكان"' },
+  'chat.welcome.3': { fa: '💡 مثال: "یک نمودار میله‌ای از روند بهبود بیماری بیمار بکش" یا "نمودار دایره‌ای از توزیع جمعیت نشان بده"', en: '💡 Example: "Draw a bar chart of patient recovery progress" or "Show a pie chart of population distribution"', ar: '💡 مثال: "ارسم مخططًا شريطيًا لتقدم شفاء المريض" أو "اعرض مخططًا دائريًا لتوزيع السكان"' },
   'chat.processing': { fa: 'در حال پردازش...', en: 'Processing...', ar: 'جارٍ المعالجة...' },
   'chat.placeholder': { fa: 'پیام خود را بنویسید... (Shift+Enter برای خط جدید)', en: 'Type your message... (Shift+Enter for new line)', ar: 'اكتب رسالتك... (Shift+Enter لسطر جديد)' },
   'chat.send': { fa: 'ارسال پیام', en: 'Send message', ar: 'إرسال رسالة' },

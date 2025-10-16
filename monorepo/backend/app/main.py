@@ -21,15 +21,15 @@ if SHARED_DIR not in sys.path:
 	sys.path.insert(0, SHARED_DIR)
 
 # System Identity Configuration
-SYSTEM_NAME = "خبیر"
-SYSTEM_NAME_ENGLISH = "Khabir"
+SYSTEM_NAME = "Mentora"
+SYSTEM_NAME_ENGLISH = "Mentora"
 DEVELOPER_NAME = "سرهنگ مهندس علی سلیمی"
 DEVELOPER_NAME_ENGLISH = "Engineer Colonel Ali Salimi"
-ORGANIZATION = "پلیس ایران"
+ORGANIZATION = "Mentora"
 
 def get_system_identity_response() -> str:
 	"""Get standardized system identity response"""
-	return f"""سلام! من {SYSTEM_NAME} ({SYSTEM_NAME_ENGLISH}) هستم، دستیار هوشمند پلیس ایران و متن شما.
+	return f"""سلام! من {SYSTEM_NAME} ({SYSTEM_NAME_ENGLISH}) هستم، دستیار هوشمند Mentora و متن شما.
 
 🤖 درباره من:
 - نام: {SYSTEM_NAME} ({SYSTEM_NAME_ENGLISH})
@@ -78,7 +78,7 @@ def schemas() -> SchemasResponse:
 
 @app.get("/api/domains", response_model=DomainsResponse)
 def domains() -> DomainsResponse:
-	return DomainsResponse(domains=["general", "legal", "medical", "police"])
+	return DomainsResponse(domains=["general", "medical"])
 
 
 @app.get("/api/speech-models")
@@ -628,7 +628,7 @@ def extract(req: ExtractionRequest) -> ExtractionResponse:
 	ai_question_keywords = [
 		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات', 'علی سلیمی کیه؟',
 		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته','نویسنده تو چه کسی است',
-		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
+		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'Mentora', 'Mentora',
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained', 'what is your name'
 	]
@@ -698,7 +698,7 @@ async def extract_file(
 	ai_question_keywords = [
 		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
 		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
-		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
+		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'Mentora', 'Mentora',
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained', 'what is your name'
 	]
@@ -789,7 +789,7 @@ def multi_extract(req: MultiModelRequest) -> MultiModelResponse:
 	ai_question_keywords = [
 		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
 		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
-		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
+		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'Mentora', 'Mentora',
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained', 'what is your name'
 	]
@@ -1366,15 +1366,11 @@ def chat(req: ChatRequest) -> ChatResponse:
 	try:
 		# Build a conversational prompt based on domain
 		domain_titles = {
-			"police": "دستیار هوشمند پلیس ایران",
-			"legal": "دستیار هوشمند حقوقی", 
 			"medical": "دستیار هوشمند پزشکی",
 			"general": "دستیار هوشمند عمومی"
 		}
 		
 		domain_expertise = {
-			"police": "شما متخصص تحلیل متون امنیتی، پلیسی، جرایم، تهدیدات و موارد مشکوک هستید.",
-			"legal": "شما متخصص تحلیل متون حقوقی، قوانین، قراردادها، دادگاه‌ها و مسائل قانونی هستید.",
 			"medical": "شما متخصص تحلیل متون پزشکی، تشخیص‌ها، درمان‌ها، داروها و مسائل سلامت هستید.",
 			"general": "شما متخصص تحلیل متون عمومی و استخراج اطلاعات ساختاریافته هستید."
 		}
@@ -1577,7 +1573,7 @@ def chat(req: ChatRequest) -> ChatResponse:
 		ai_question_keywords = [
 			'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
 			'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
-			'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
+			'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'Mentora', 'Mentora',
 			'who are you', 'who created you', 'who developed you', 'who wrote you',
 			'where were you developed', 'where were you trained', 'what is your name'
 		]

@@ -117,7 +117,7 @@ function InnerApp() {
   
   // Common settings
   const [language, setLanguage] = useState<'fa' | 'en' | 'ar'>(locale)
-  const [domain, setDomain] = useState<'general' | 'legal' | 'medical' | 'police'>('police')
+  const [domain, setDomain] = useState<'general' | 'medical'>('general')
   const [error, setError] = useState<string | null>(null)
   
   // Models
@@ -278,26 +278,6 @@ function InnerApp() {
     if (suspects.length > 0) {
       const suspectName = suspects[0].name
       
-      // Police domain specific interpretations
-      if (domain === 'police' && language === 'fa') {
-        if (suspiciousBehaviors.length > 0 || criminalInferences.length > 0) {
-          interpretations.push({
-            text: `${suspectName} احتمالاً دزد است و در اینجا دزدی کرده است!`,
-            confidence: 'high',
-            type: 'inference',
-            entities: [suspectName]
-          })
-        }
-        
-        if (suspiciousBehaviors.length > 0) {
-          interpretations.push({
-            text: `رفتارهای مشکوک شناسایی شده: ${suspiciousBehaviors.map(b => b.name).join('، ')}`,
-            confidence: 'high',
-            type: 'warning',
-            entities: suspiciousBehaviors.map(b => b.name)
-          })
-        }
-      }
       
       // General interpretations for any domain
       if (interpretations.length === 0) {
@@ -1559,13 +1539,11 @@ function InnerApp() {
                     <h4>{t('general.domain')}</h4>
                     <select 
                       value={domain}
-                      onChange={(e) => setDomain(e.target.value as 'general' | 'legal' | 'medical' | 'police')}
+                      onChange={(e) => setDomain(e.target.value as 'general' | 'medical')}
                       className='settings-select'
                     >
                       <option value='general'>{t('general.domain.general')}</option>
-                      <option value='legal'>{t('general.domain.legal')}</option>
                       <option value='medical'>{t('general.domain.medical')}</option>
-                      <option value='police'>{t('general.domain.police')}</option>
                     </select>
                   </div>
                 </div>
