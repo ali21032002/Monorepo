@@ -21,15 +21,15 @@ if SHARED_DIR not in sys.path:
 	sys.path.insert(0, SHARED_DIR)
 
 # System Identity Configuration
-SYSTEM_NAME = "گُرِم"
-SYSTEM_NAME_ENGLISH = "Gorem"
+SYSTEM_NAME = "خبیر"
+SYSTEM_NAME_ENGLISH = "Khabir"
 DEVELOPER_NAME = "سرهنگ مهندس علی سلیمی"
 DEVELOPER_NAME_ENGLISH = "Engineer Colonel Ali Salimi"
-ORGANIZATION = "مرکز مدیریت و تحلیل داده فراجا"
+ORGANIZATION = "پلیس ایران"
 
 def get_system_identity_response() -> str:
 	"""Get standardized system identity response"""
-	return f"""سلام! من {SYSTEM_NAME} ({SYSTEM_NAME_ENGLISH}) هستم، دستیار هوشمند تحلیل داده و متن شما.
+	return f"""سلام! من {SYSTEM_NAME} ({SYSTEM_NAME_ENGLISH}) هستم، دستیار هوشمند پلیس ایران و متن شما.
 
 🤖 درباره من:
 - نام: {SYSTEM_NAME} ({SYSTEM_NAME_ENGLISH})
@@ -628,7 +628,7 @@ def extract(req: ExtractionRequest) -> ExtractionResponse:
 	ai_question_keywords = [
 		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات', 'علی سلیمی کیه؟',
 		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته','نویسنده تو چه کسی است',
-		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'گُرِم', 'gorem',
+		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained', 'what is your name'
 	]
@@ -698,7 +698,7 @@ async def extract_file(
 	ai_question_keywords = [
 		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
 		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
-		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'گُرِم', 'gorem',
+		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained', 'what is your name'
 	]
@@ -789,7 +789,7 @@ def multi_extract(req: MultiModelRequest) -> MultiModelResponse:
 	ai_question_keywords = [
 		'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
 		'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
-		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'گُرِم', 'gorem',
+		'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
 		'who are you', 'who created you', 'who developed you', 'who wrote you',
 		'where were you developed', 'where were you trained', 'what is your name'
 	]
@@ -968,6 +968,12 @@ def chat(req: ChatRequest) -> ChatResponse:
 				if not last_records_match:
 					last_records_match = re.search(r'(\d+)\s*رکورد\s*آخرین', req.message.lower())
 				if not last_records_match:
+					# Pattern for "N رکورد اول"
+					last_records_match = re.search(r'(\d+)\s*رکورد\s*اول', req.message.lower())
+				if not last_records_match:
+					# Pattern for "N رکورد اولین"
+					last_records_match = re.search(r'(\d+)\s*رکورد\s*اولین', req.message.lower())
+				if not last_records_match:
 					# Pattern for "فقط N رکورد"
 					last_records_match = re.search(r'فقط\s*(\d+)\s*رکورد', req.message.lower())
 				if not last_records_match:
@@ -980,10 +986,15 @@ def chat(req: ChatRequest) -> ChatResponse:
 				
 				if last_records_match:
 					size = int(last_records_match.group(1))
-					# Check if it's a "last" query or just "N records" query
+					# Check if it's a "last", "first", or just "N records" query
 					if any(word in req.message.lower() for word in ['اخر', 'آخر', 'آخرین', 'last']):
 						sort_field = "@timestamp"
+						sort_order = "desc"
 						print(f"🎯 Detected last {size} records query")
+					elif any(word in req.message.lower() for word in ['اول', 'اولین', 'first']):
+						sort_field = "@timestamp"
+						sort_order = "asc"
+						print(f"🎯 Detected first {size} records query")
 					else:
 						sort_field = None
 						print(f"🎯 Detected {size} records query (no specific order)")
@@ -1004,9 +1015,9 @@ def chat(req: ChatRequest) -> ChatResponse:
 					"_source": source_fields
 				}
 				
-				# Add sorting if it's a "last records" query
+				# Add sorting if it's a "last" or "first" records query
 				if last_records_match and sort_field:
-					search_body["sort"] = [{"@timestamp": {"order": "desc"}}]
+					search_body["sort"] = [{"@timestamp": {"order": sort_order}}]
 					print(f"🎯 Added sort: {search_body['sort']}")
 				elif last_records_match:
 					print(f"🎯 No sorting added (just {size} records)")
@@ -1050,8 +1061,8 @@ def chat(req: ChatRequest) -> ChatResponse:
 				# Detect all statistical operations needed (only if statistics are requested)
 				needs_sum = any(word in req.message.lower() for word in ['جمع', 'مجموع', 'sum'])
 				needs_average = any(word in req.message.lower() for word in ['میانگین', 'average', 'avg'])
-				needs_min = any(word in req.message.lower() for word in ['حداقل', 'کمترین', 'min', 'minimum'])
-				needs_max = any(word in req.message.lower() for word in ['حداکثر', 'بیشترین', 'max', 'maximum'])
+				needs_min = any(word in req.message.lower() for word in ['حداقل', 'کمترین', 'کوچکترین', 'min', 'minimum'])
+				needs_max = any(word in req.message.lower() for word in ['حداکثر', 'بیشترین', 'بزرگترین', 'مشخص کن', 'max', 'maximum'])
 				needs_count = any(word in req.message.lower() for word in ['فراوانی', 'تعداد', 'count', 'frequency'])
 				needs_std = any(word in req.message.lower() for word in ['انحراف', 'گریز', 'standard', 'std'])
 				needs_median = any(word in req.message.lower() for word in ['میانه', 'median', 'مدین'])
@@ -1127,7 +1138,12 @@ def chat(req: ChatRequest) -> ChatResponse:
 				
 				# Format response with HTML table - improved colors
 				if last_records_match:
-					title = f"📋 لیست {size} رکورد آخر فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
+					if any(word in req.message.lower() for word in ['اخر', 'آخر', 'آخرین', 'last']):
+						title = f"📋 لیست {size} رکورد آخر فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
+					elif any(word in req.message.lower() for word in ['اول', 'اولین', 'first']):
+						title = f"📋 لیست {size} رکورد اول فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
+					else:
+						title = f"📋 لیست {size} رکورد فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
 				else:
 					title = f"📋 لیست {size} رکورد فیلد 'Price_USD' از ایندکس 'gold_data-2025.09.29'"
 				# Build table header based on what fields are needed
@@ -1350,7 +1366,7 @@ def chat(req: ChatRequest) -> ChatResponse:
 	try:
 		# Build a conversational prompt based on domain
 		domain_titles = {
-			"police": "دستیار هوشمند امنیتی و پلیسی",
+			"police": "دستیار هوشمند پلیس ایران",
 			"legal": "دستیار هوشمند حقوقی", 
 			"medical": "دستیار هوشمند پزشکی",
 			"general": "دستیار هوشمند عمومی"
@@ -1561,7 +1577,7 @@ def chat(req: ChatRequest) -> ChatResponse:
 		ai_question_keywords = [
 			'تو کی هستی', 'تو کجا توسعه پیدا کردی', 'چه کسی نوشته ات', 'چه کسی توسعه داده ات',
 			'کجا آموزش دیده ای', 'توسعه دهنده تو کیست', 'نویسنده تو کیست', 'چه کسی تو را ساخته',
-			'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'گُرِم', 'gorem',
+			'نام تو چیست', 'اسم تو چیه', 'چی صدات کنم', 'خبیر', 'Khabir',
 			'who are you', 'who created you', 'who developed you', 'who wrote you',
 			'where were you developed', 'where were you trained', 'what is your name'
 		]
