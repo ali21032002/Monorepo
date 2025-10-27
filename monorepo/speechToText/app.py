@@ -21,7 +21,14 @@ except ImportError:
     HF_AVAILABLE = False
     pipeline = None
 
-app = FastAPI(title="Speech-to-Text Service", version="1.0.0")
+app = FastAPI(
+    title="Speech-to-Text Service",
+    version="1.0.0",
+    description="سرویس تبدیل گفتار به متن با پشتیبانی از مدل‌های ترکیبی فارسی و انگلیسی",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
+)
 
 # CORS middleware
 app.add_middleware(
@@ -575,7 +582,10 @@ def cleanup_old_temp_files():
     except Exception as e:
         print(f"Error during cleanup: {e}")
 
-@app.get("/diagnose")
+@app.get("/diagnose", 
+         summary="تشخیص محیط سیستم",
+         description="بررسی وضعیت محیط PyTorch، CUDA و مدل‌های موجود",
+         tags=["System"])
 def diagnose():
     """Diagnose environment and return information"""
     try:
@@ -606,7 +616,10 @@ def diagnose():
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
-@app.get("/health")
+@app.get("/health",
+         summary="بررسی سلامت سرویس",
+         description="بررسی وضعیت کلی سرویس و مدل‌های موجود",
+         tags=["System"])
 def health_check():
     """Health check endpoint"""
     hf_status = "available" if HF_AVAILABLE else "not available"
@@ -640,11 +653,15 @@ def health_check():
         "note": "Hybrid Persian speech recognition with Whisper + Hugging Face models"
     }
 
-@app.post("/transcribe", response_model=TranscriptionResponse)
+@app.post("/transcribe", 
+           response_model=TranscriptionResponse,
+           summary="تبدیل گفتار به متن",
+           description="تبدیل فایل صوتی به متن با استفاده از مدل Whisper",
+           tags=["Transcription"])
 async def transcribe_audio(
-    audio_file: UploadFile = File(...),
-    language: Optional[str] = Form(None),
-    model_size: str = Form("large")
+    audio_file: UploadFile = File(..., description="فایل صوتی برای تبدیل"),
+    language: Optional[str] = Form(None, description="زبان گفتار (اختیاری)"),
+    model_size: str = Form("large", description="اندازه مدل Whisper")
 ):
     """
     Transcribe audio file to text using Whisper
@@ -705,10 +722,14 @@ async def transcribe_audio(
         print(f"Transcription error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
-@app.post("/transcribe-chat", response_model=TranscriptionResponse)
+@app.post("/transcribe-chat", 
+           response_model=TranscriptionResponse,
+           summary="تبدیل گفتار برای چت",
+           description="تبدیل بهینه شده گفتار به متن برای رابط چت",
+           tags=["Transcription"])
 async def transcribe_for_chat(
-    audio_file: UploadFile = File(...),
-    language: str = Form("fa")  # Default to Persian for chat
+    audio_file: UploadFile = File(..., description="فایل صوتی برای تبدیل"),
+    language: str = Form("fa", description="زبان گفتار (پیش‌فرض: فارسی)")
 ):
     """
     Optimized transcription endpoint for chat interface
@@ -769,11 +790,15 @@ async def transcribe_for_chat(
         print(f"Chat transcription error: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
-@app.post("/transcribe-hybrid", response_model=TranscriptionResponse)
+@app.post("/transcribe-hybrid", 
+           response_model=TranscriptionResponse,
+           summary="تبدیل ترکیبی گفتار",
+           description="تبدیل گفتار با استفاده از مدل‌های ترکیبی فارسی برای حداکثر دقت",
+           tags=["Transcription"])
 async def transcribe_hybrid(
-    audio_file: UploadFile = File(...),
-    language: str = Form("fa"),
-    model_preference: str = Form("auto")
+    audio_file: UploadFile = File(..., description="فایل صوتی برای تبدیل"),
+    language: str = Form("fa", description="زبان گفتار (پیش‌فرض: فارسی)"),
+    model_preference: str = Form("auto", description="ترجیح مدل (auto, persian_voice, whisper_fa)")
 ):
     """
     Hybrid transcription using both Persian models for maximum accuracy
@@ -835,7 +860,10 @@ async def transcribe_hybrid(
         print(f"Hybrid transcription error: {e}")
         raise HTTPException(status_code=500, detail=f"Hybrid transcription failed: {str(e)}")
 
-@app.get("/test-models")
+@app.get("/test-models",
+         summary="تست مدل‌ها",
+         description="تست تمام مدل‌های موجود با نمونه صوتی ساده",
+         tags=["Testing"])
 def test_models():
     """Test all available models with a simple audio sample"""
     try:
@@ -891,7 +919,10 @@ def test_models():
     except Exception as e:
         return {"error": f"Test failed: {str(e)}"}
 
-@app.get("/models")
+@app.get("/models",
+         summary="لیست مدل‌های موجود",
+         description="دریافت اطلاعات مدل‌های موجود و وضعیت آنها",
+         tags=["Models"])
 def get_available_models():
     """Get information about available models"""
     models_info = {
