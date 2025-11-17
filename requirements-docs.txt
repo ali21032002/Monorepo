@@ -2,4 +2,5 @@ mkdocs==1.5.3
 mkdocs-material==9.5.3
 mkdocstrings[python]==0.24.0
 griffe>=0.37,<1.0
+mkdocs-pdf-export-plugin>=0.5.9
 

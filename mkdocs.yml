@@ -37,6 +37,12 @@ plugins:
   - search
   - autorefs:
       link_titles: true
+  # PDF export disabled on Windows due to weasyprint dependencies
+  # Use HTML static files in site/ directory instead
+  # Or use browser's print to PDF feature
+  # - pdf-export:
+  #     combined: true
+  #     combined_output_path: documentation.pdf
   - mkdocstrings:
       handlers:
         python:

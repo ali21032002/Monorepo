@@ -6,6 +6,11 @@
          <changefreq>daily</changefreq>
     </url>
     <url>
+         <loc>http://localhost:8000/docs/EXPORT_GUIDE/</loc>
+         <lastmod>2025-11-17</lastmod>
+         <changefreq>daily</changefreq>
+    </url>
+    <url>
          <loc>http://localhost:8000/docs/architecture/</loc>
          <lastmod>2025-11-17</lastmod>
          <changefreq>daily</changefreq>
