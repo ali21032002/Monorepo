@@ -1,0 +1,95 @@
+site_name: Mentora Documentation
+site_description: Documentation for Mentora LangExtract and related services
+site_author: Mentora AI Team
+site_url: http://localhost:8000/docs
+
+repo_name: Mentora/Monorepo
+repo_url: https://github.com/Mentora/Monorepo
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.annotate
+    - content.code.copy
+    - content.code.select
+
+plugins:
+  - search
+  - autorefs:
+      link_titles: true
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [monorepo/shared, monorepo/backend/app, monorepo/cli, monorepo/speechToText, monorepo/user_service/app]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_toc_entry: true
+            show_root_full_path: false
+            show_object_full_path: false
+            show_category_heading: true
+            show_if_no_docstring: false
+            merge_init_into_class: true
+            show_signature_annotations: true
+            separate_signature: true
+            line_length: 80
+            show_submodules: true
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+  - API Reference:
+    - Backend Service: api/backend.md
+    - Speech-to-Text Service: api/speech-to-text.md
+    - User Service: api/user-service.md
+  - Modules:
+    - LangExtract Core: modules/langextract-core.md
+    - Schemas: modules/schemas.md
+    - Prompts: modules/prompts.md
+  - CLI: cli.md
+  - Examples: examples.md
+  - Architecture: architecture.md
+
